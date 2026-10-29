@@ -3,6 +3,11 @@
 Validated locally on Linux x86_64, 2026-10-29. macOS and ARM builds are defined in
 release CI but have not been run on this workstation. No release has been published.
 
+Repository pushes to master succeeded. Remote CI status could not be read with the
+available GitHub API credentials (404), so only local checks are claimed here.
+Anonymous download access to the repository was not available in this session; the
+public curl flow additionally needs anonymously accessible script/release assets.
+
 ## Automated checks
 
 - `cargo fmt --check`
@@ -35,6 +40,11 @@ release CI but have not been run on this workstation. No release has been publis
 Release-mode search benchmark over the bundled 6,184 entries: about 66 ms to build
 an index, about 9.3 ms per `ndsd` query on this workstation. Includes bounded
 polyphonic pinyin expansion. Timings vary with hardware and workload.
+
+Final release binary: about 7.9 MiB. A local minimal/demo-mode PTY sample reached
+the first screen in about 154 ms, used about 14.7 MiB RSS, and averaged 0.40% of
+one logical CPU over a five-second sample. This is a small demo watchlist and a
+short observation, not a guarantee for all machines or large real-data workloads.
 
 ## Code review
 

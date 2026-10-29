@@ -440,3 +440,63 @@ fn pinyin_search_handles_polyphonic_company_names() {
             .any(|s| s.name == "重庆银行")
     );
 }
+
+#[test]
+fn first_run_mode_save_does_not_persist_temporary_cli_network_settings() {
+    let (_dir, mut app) = app();
+    app.config.refresh.quotes_secs = 30;
+    app.config.network.proxy_mode = ProxyMode::Custom;
+    app.config.network.proxy_url = "http://temporary:secret@localhost:7890".into();
+    app.modal = Some(Modal::Welcome(1));
+    app.key(key(KeyCode::Enter));
+    let saved = app.paths.load_config().unwrap().0;
+    assert_eq!(saved.default_mode, Mode::Minimal);
+    assert_eq!(saved.refresh.quotes_secs, 5);
+    assert_eq!(saved.network.proxy_mode, ProxyMode::System);
+    assert_eq!(app.config.refresh.quotes_secs, 30);
+    assert!(
+        !std::fs::read_to_string(&app.paths.config)
+            .unwrap()
+            .contains("secret")
+    );
+}
+
+#[test]
+fn failed_modal_group_save_is_reported_and_can_be_retried() {
+    let (_dir, mut app) = app();
+    let state_path = app.paths.data.join("demo-state.json");
+    std::fs::create_dir(&state_path).unwrap();
+    app.modal = Some(Modal::GroupName {
+        id: None,
+        input: "需重试分组".into(),
+    });
+    app.key(key(KeyCode::Enter));
+    assert!(app.state_dirty);
+    assert!(app.message.contains("保存失败"));
+    std::fs::remove_dir(&state_path).unwrap();
+    assert!(app.flush_state());
+    assert!(!app.state_dirty);
+    let saved = UserState::load(&state_path).unwrap();
+    assert!(saved.groups.iter().any(|g| g.name == "需重试分组"));
+}
+
+#[test]
+fn failed_add_to_group_save_is_retried_without_losing_the_stock() {
+    let (_dir, mut app) = app();
+    let state_path = app.paths.data.join("demo-state.json");
+    std::fs::create_dir(&state_path).unwrap();
+    let stock = app
+        .catalog
+        .iter()
+        .find(|s| s.id == "sz000001")
+        .unwrap()
+        .clone();
+    app.modal = Some(Modal::AddTo { stock, index: 1 });
+    app.key(key(KeyCode::Enter));
+    assert!(app.state_dirty);
+    assert!(app.message.contains("保存失败"));
+    std::fs::remove_dir(&state_path).unwrap();
+    assert!(app.flush_state());
+    let saved = UserState::load(&state_path).unwrap();
+    assert!(saved.groups[0].symbols.contains(&"sz000001".into()));
+}

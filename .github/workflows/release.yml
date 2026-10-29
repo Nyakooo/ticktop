@@ -28,7 +28,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
-          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
+          target='${{ matrix.target }}'
+          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
+          upper_target="${target^^}"
+          echo "CARGO_TARGET_${upper_target//-/_}_LINKER=musl-gcc" >> "$GITHUB_ENV"
       - run: cargo test --locked
       - name: Build release
         run: |

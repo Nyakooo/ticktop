@@ -17,7 +17,8 @@ async fn main() -> Result<()> {
         return update();
     }
     let paths = Paths::resolve(cli.data_dir.as_ref())?;
-    let (mut config, first) = paths.load_config()?;
+    let (saved_config, first) = paths.load_config()?;
+    let mut config = saved_config.clone();
     config.apply_cli(&cli);
     config.validate()?;
     if cli.check {
@@ -36,7 +37,13 @@ async fn main() -> Result<()> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         anyhow::bail!("请在交互终端中运行，或用 --check 检查行情连接");
     }
-    let mut app = App::new(config, paths, first && !cli.minimal && !cli.full, cli.demo)?;
+    let mut app = App::new(
+        saved_config,
+        paths,
+        first && !cli.minimal && !cli.full,
+        cli.demo,
+    )?;
+    app.config = config;
     if cli.minimal {
         app.user.mode = Mode::Minimal;
     }
@@ -44,8 +51,7 @@ async fn main() -> Result<()> {
         app.user.mode = Mode::Full;
     }
     if first && (cli.minimal || cli.full) {
-        app.config.default_mode = app.user.mode;
-        app.paths.save_config(&app.config)?;
+        app.save_default_mode()?;
     }
     let (request_tx, request_rx) = watch::channel(app.request());
     let (event_tx, mut event_rx) = mpsc::channel(32);
@@ -65,8 +71,7 @@ async fn main() -> Result<()> {
                 event=event_rx.recv()=>if let Some(e)=event{app.on_market(e)},
                 _ = tick.tick() => {
                     if app.state_dirty {
-                        app.state_dirty = false;
-                        if app.persist().is_err() { app.state_dirty = true; app.message = "自选保存失败，退出时将重试".into(); }
+                        app.flush_state();
                     }
                     if !app.paused { app.dirty = true; }
                 },

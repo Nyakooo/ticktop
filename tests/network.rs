@@ -112,3 +112,71 @@ async fn broken_custom_proxy_never_falls_back_to_direct() {
     assert!(upstream.accept().is_err());
     assert!(!market::safe_error(&error.into()).contains("private-password"));
 }
+
+#[test]
+fn malformed_environment_proxies_are_rejected_without_exposing_credentials() {
+    for value in [
+        "http://alice:secret@",
+        "ftp://alice:secret@proxy:21",
+        "http://bad host:7890",
+    ] {
+        let result = market::system_proxies(|name| {
+            Ok(if name == "HTTPS_PROXY" {
+                Some(value.into())
+            } else {
+                None
+            })
+        });
+        let message = format!("{:#}", result.unwrap_err());
+        assert!(message.contains("HTTPS_PROXY"));
+        assert!(!message.contains("secret"));
+    }
+    assert!(
+        market::system_proxies(|name| Ok(if name == "https_proxy" {
+            Some("socks5h://localhost:1080".into())
+        } else {
+            None
+        }))
+        .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn environment_no_proxy_exclusion_is_respected() {
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let target = upstream.local_addr().unwrap();
+    let task = std::thread::spawn(move || {
+        let (mut stream, _) = upstream.accept().unwrap();
+        let mut request = [0; 2048];
+        assert!(stream.read(&mut request).unwrap() > 0);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+    let proxies = market::system_proxies(|name| {
+        Ok(match name {
+            "ALL_PROXY" => Some("http://127.0.0.1:1".into()),
+            "NO_PROXY" => Some("127.0.0.1".into()),
+            _ => None,
+        })
+    })
+    .unwrap();
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(3));
+    for proxy in proxies {
+        builder = builder.proxy(proxy);
+    }
+    let body = builder
+        .build()
+        .unwrap()
+        .get(format!("http://{target}/"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "ok");
+    task.join().unwrap();
+}

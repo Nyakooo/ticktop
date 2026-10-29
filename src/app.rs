@@ -44,6 +44,7 @@ pub enum Modal {
 }
 pub struct App {
     pub config: Config,
+    saved_config: Config,
     pub paths: Paths,
     pub user: UserState,
     pub cache: Cache,
@@ -94,6 +95,7 @@ impl App {
             .map(|q| (q.id.clone(), q))
             .collect();
         let mut app = Self {
+            saved_config: config.clone(),
             config,
             paths,
             user,
@@ -144,6 +146,32 @@ impl App {
         } else {
             "state.json"
         }))
+    }
+    pub fn save_default_mode(&mut self) -> Result<()> {
+        let mut saved = self.saved_config.clone();
+        saved.default_mode = self.user.mode;
+        self.paths.save_config(&saved)?;
+        self.saved_config = saved;
+        self.config.default_mode = self.user.mode;
+        Ok(())
+    }
+    pub fn flush_state(&mut self) -> bool {
+        match self.persist() {
+            Ok(()) => {
+                self.state_dirty = false;
+                true
+            }
+            Err(_) => {
+                self.state_dirty = true;
+                self.message = "自选保存失败，将自动重试".into();
+                self.dirty = true;
+                false
+            }
+        }
+    }
+    fn save_state_change(&mut self) -> bool {
+        self.state_dirty = true;
+        self.flush_state()
     }
     pub fn selected_stock(&self) -> Option<&Instrument> {
         self.user
@@ -444,7 +472,7 @@ impl App {
     fn handle_modal(&mut self, modal: Modal, key: KeyEvent) {
         if key.code == KeyCode::Esc {
             if matches!(modal, Modal::Welcome(_))
-                && let Err(err) = self.paths.save_config(&self.config)
+                && let Err(err) = self.save_default_mode()
             {
                 self.message = err.to_string();
             }
@@ -473,13 +501,10 @@ impl App {
                     KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => i = 1 - i,
                     KeyCode::Enter => {
                         self.user.mode = if i == 0 { Mode::Full } else { Mode::Minimal };
-                        self.config.default_mode = self.user.mode;
-                        if let Err(e) = self.paths.save_config(&self.config) {
+                        if let Err(e) = self.save_default_mode() {
                             self.message = e.to_string();
                         }
-                        if let Err(e) = self.persist() {
-                            self.message = e.to_string();
-                        }
+                        self.save_state_change();
                         return;
                     }
                     _ => {}
@@ -543,9 +568,7 @@ impl App {
                                 self.user.selected = Some(stock.id);
                                 self.request_dirty = true;
                                 self.load_chart();
-                                if let Err(e) = self.persist() {
-                                    self.message = e.to_string();
-                                } else {
+                                if self.save_state_change() {
                                     self.message = "已加入自选分组".into();
                                 }
                                 return;
@@ -584,7 +607,7 @@ impl App {
                         self.ensure_selection();
                         self.load_chart();
                         self.request_dirty = true;
-                        let _ = self.persist();
+                        self.save_state_change();
                         return;
                     }
                     _ => {}
@@ -604,9 +627,7 @@ impl App {
                             self.ensure_selection();
                             self.load_chart();
                             self.request_dirty = true;
-                            if let Err(e) = self.persist() {
-                                self.message = e.to_string();
-                            }
+                            self.save_state_change();
                             return;
                         }
                         Err(e) => self.message = e.to_string(),
@@ -625,9 +646,7 @@ impl App {
                     self.ensure_selection();
                     self.load_chart();
                     self.request_dirty = true;
-                    if let Err(e) = self.persist() {
-                        self.message = e.to_string();
-                    }
+                    self.save_state_change();
                     return;
                 }
                 if key.code == KeyCode::Char('n') {
@@ -655,6 +674,7 @@ impl App {
                         match draft.validate() {
                             Ok(()) => match self.paths.save_config(&draft) {
                                 Ok(()) => {
+                                    self.saved_config = draft.clone();
                                     self.config = draft;
                                     self.request_dirty = true;
                                     self.message = "设置已保存并生效".into();

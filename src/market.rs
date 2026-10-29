@@ -44,7 +44,16 @@ pub fn client(config: &Network) -> Result<reqwest::Client> {
         .connect_timeout(Duration::from_secs(config.timeout_secs.min(10)))
         .user_agent(concat!("ticktop/", env!("CARGO_PKG_VERSION")));
     match config.proxy_mode {
-        ProxyMode::System => {}
+        ProxyMode::System => {
+            builder = builder.no_proxy();
+            for proxy in system_proxies(|name| match std::env::var(name) {
+                Ok(value) => Ok(Some(value)),
+                Err(std::env::VarError::NotPresent) => Ok(None),
+                Err(_) => anyhow::bail!("系统代理环境变量 {name} 不是有效 UTF-8，已禁止请求"),
+            })? {
+                builder = builder.proxy(proxy);
+            }
+        }
         ProxyMode::Direct => builder = builder.no_proxy(),
         ProxyMode::Custom => {
             builder = builder.no_proxy().proxy(
@@ -56,6 +65,51 @@ pub fn client(config: &Network) -> Result<reqwest::Client> {
     builder
         .build()
         .map_err(|_| anyhow::anyhow!("无法创建网络客户端，请检查代理配置"))
+}
+/// Resolve environment proxies explicitly: reqwest's automatic resolver silently
+/// discards malformed variables. Reject them instead of unexpectedly going direct.
+pub fn system_proxies(get: impl Fn(&str) -> Result<Option<String>>) -> Result<Vec<reqwest::Proxy>> {
+    let read = |upper: &str, lower: &str| -> Result<Option<String>> {
+        let value = match get(upper)? {
+            Some(value) => Some(value),
+            None => get(lower)?,
+        };
+        Ok(value.filter(|value| !value.trim().is_empty()))
+    };
+    let http = read("HTTP_PROXY", "http_proxy")?;
+    let https = read("HTTPS_PROXY", "https_proxy")?;
+    let all = read("ALL_PROXY", "all_proxy")?;
+    let excluded = read("NO_PROXY", "no_proxy")?;
+    let no_proxy = excluded.as_deref().and_then(reqwest::NoProxy::from_string);
+    let mut proxies = Vec::new();
+    for (name, value, scheme) in [
+        ("HTTP_PROXY", http, 0),
+        ("HTTPS_PROXY", https, 1),
+        ("ALL_PROXY", all, 2),
+    ] {
+        let Some(raw) = value else { continue };
+        let raw = raw.trim();
+        let address = if raw.contains("://") {
+            raw.to_string()
+        } else {
+            format!("http://{raw}")
+        };
+        let url = reqwest::Url::parse(&address)
+            .map_err(|_| anyhow::anyhow!("系统代理环境变量 {name} 无效，已禁止请求"))?;
+        if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
+            || url.host_str().is_none()
+        {
+            anyhow::bail!("系统代理环境变量 {name} 无效，已禁止请求");
+        }
+        let proxy = match scheme {
+            0 => reqwest::Proxy::http(address),
+            1 => reqwest::Proxy::https(address),
+            _ => reqwest::Proxy::all(address),
+        }
+        .map_err(|_| anyhow::anyhow!("系统代理环境变量 {name} 无效，已禁止请求"))?;
+        proxies.push(proxy.no_proxy(no_proxy.clone()));
+    }
+    Ok(proxies)
 }
 /// Deliberately omit URLs and raw upstream bodies: they can contain proxy credentials.
 pub fn safe_error(error: &anyhow::Error) -> String {
@@ -397,7 +451,11 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                 if tx
                     .send(MarketEvent::Error {
                         kind,
-                        message: safe_error(&err),
+                        message: if http.is_none() {
+                            "网络/代理配置无效，请检查设置或代理环境变量".into()
+                        } else {
+                            safe_error(&err)
+                        },
                         retry_secs: delay,
                     })
                     .await

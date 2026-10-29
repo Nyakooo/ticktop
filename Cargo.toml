@@ -1,0 +1,36 @@
+[package]
+name = "ticktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A quiet, keyboard-first A-share market terminal"
+license = "MIT"
+repository = "https://github.com/Nyakooo/terminal-stock-dashboard"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
+directories = "6"
+encoding_rs = "0.8"
+futures-util = "0.3"
+pinyin = { version = "0.10", default-features = false, features = ["plain", "heteronym"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "socks", "charset"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+strsim = "0.11"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal"] }
+toml = "0.8"
+unicode-normalization = "0.1"
+unicode-width = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

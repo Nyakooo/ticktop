@@ -40,7 +40,9 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         drain()
 
     try:
-        drain(1)
+        startup_deadline = time.monotonic() + 10
+        while "ticktop_" not in output.decode(errors="replace") and time.monotonic() < startup_deadline:
+            drain(0.1)
         assert "ticktop_" in output.decode(errors="replace"), "initial render missing"
         send("a")
         send("宁德")

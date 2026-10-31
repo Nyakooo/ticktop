@@ -18,10 +18,10 @@
 
 | 系统 | 芯片架构 | 下载 | 校验 |
 | --- | --- | --- | --- |
-| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
-| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
-| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
-| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.1.0/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
+| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
+| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
+| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
+| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
 
 解压后，在终端进入解压目录，运行 `./ticktop`。
 

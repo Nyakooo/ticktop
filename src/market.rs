@@ -20,17 +20,21 @@ pub struct Request {
     pub period: Period,
     pub demo: bool,
     pub catalog_as_of: String,
+    pub heatmap_enabled: bool,
+    pub sector_category: crate::sectors::Category,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Quotes,
     Chart,
     Catalog,
+    Sectors,
 }
 pub enum MarketEvent {
     Quotes(Vec<Quote>),
     Chart(Series),
     Catalog(Catalog),
+    Sectors(crate::sectors::Snapshot),
     Error {
         kind: Kind,
         message: String,
@@ -78,7 +82,14 @@ pub fn system_proxies(get: impl Fn(&str) -> Result<Option<String>>) -> Result<Ve
     };
     let http = read("HTTP_PROXY", "http_proxy")?;
     let https = read("HTTPS_PROXY", "https_proxy")?;
-    let all = read("ALL_PROXY", "all_proxy")?;
+    // ALL_PROXY is only applicable when a protocol-specific proxy is absent.
+    // Desktop sessions may export an unsupported legacy ALL_PROXY alongside
+    // valid explicit HTTP/HTTPS settings; ignoring that unused value is not a bypass.
+    let all = if http.is_some() && https.is_some() {
+        None
+    } else {
+        read("ALL_PROXY", "all_proxy")?
+    };
     let excluded = read("NO_PROXY", "no_proxy")?;
     let no_proxy = excluded.as_deref().and_then(reqwest::NoProxy::from_string);
     let mut proxies = Vec::new();
@@ -345,10 +356,15 @@ fn same_job(a: &Request, b: &Request, kind: Kind) -> bool {
                     && a.config.refresh.chart_secs == b.config.refresh.chart_secs
             }
             Kind::Catalog => true,
+            Kind::Sectors => {
+                a.heatmap_enabled == b.heatmap_enabled
+                    && a.sector_category == b.sector_category
+                    && a.config.refresh.sectors_secs == b.config.refresh.sectors_secs
+            }
         }
 }
 pub fn spawn_workers(rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>) {
-    for kind in [Kind::Quotes, Kind::Chart, Kind::Catalog] {
+    for kind in [Kind::Quotes, Kind::Chart, Kind::Catalog, Kind::Sectors] {
         tokio::spawn(worker(rx.clone(), tx.clone(), kind));
     }
 }
@@ -406,6 +422,9 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                         job.period,
                     )),
                     Kind::Catalog => return Err(anyhow::anyhow!("demo catalog uses bundled data")),
+                    Kind::Sectors => {
+                        MarketEvent::Sectors(crate::sectors::demo(job.sector_category))
+                    }
                 });
             }
             let h = http.as_ref().context("invalid network configuration")?;
@@ -415,9 +434,15 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                     history(h, job.focus.as_deref().context("no selection")?, job.period).await?,
                 ),
                 Kind::Catalog => MarketEvent::Catalog(catalog(h).await?),
+                Kind::Sectors => {
+                    MarketEvent::Sectors(crate::sectors::fetch(h, job.sector_category).await?)
+                }
             })
         };
-        if (kind == Kind::Chart && job.focus.is_none()) || (kind == Kind::Catalog && job.demo) {
+        if (kind == Kind::Chart && job.focus.is_none())
+            || (kind == Kind::Catalog && job.demo)
+            || (kind == Kind::Sectors && !job.heatmap_enabled)
+        {
             deadline = tokio::time::Instant::now() + Duration::from_secs(86400);
             continue;
         }
@@ -436,6 +461,7 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             Kind::Quotes => request.config.refresh.quotes_secs,
             Kind::Chart => request.config.refresh.chart_secs,
             Kind::Catalog => 86400,
+            Kind::Sectors => request.config.refresh.sectors_secs,
         };
         let delay = match result {
             Ok(event) => {

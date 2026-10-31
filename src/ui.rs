@@ -73,16 +73,6 @@ fn block(title: impl Into<String>, p: Palette) -> Block<'static> {
         .border_style(Style::default().fg(p.line))
         .title(Line::from(text(title, p.accent)))
 }
-fn age(q: &Quote) -> String {
-    let secs = q.age_secs();
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}h", secs / 3600)
-    }
-}
 fn source_status(q: &Quote) -> String {
     if q.age_secs() > 120 {
         format!("快照 · {}", q.source_time.format("%m-%d %H:%M"))
@@ -106,19 +96,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
         );
         return;
     }
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Min(6),
-            Constraint::Length(2),
-            Constraint::Length(1),
-        ])
-        .margin(1)
-        .split(area);
+    let outer = outer_layout(area);
     header(frame, app, outer[0], p);
-    groups(frame, app, outer[1], p);
+    if app.user.heatmap {
+        cloud_tabs(frame, app, outer[1], p);
+    } else {
+        groups(frame, app, outer[1], p);
+    }
     if app.user.heatmap {
         heatmap(frame, app, outer[2], p)
     } else if app.user.mode == Mode::Minimal {
@@ -133,6 +117,18 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "hold".into()
         } else {
             "显示已暂停 · 后台继续更新，Space 恢复最新数据".into()
+        }
+    } else if app.user.heatmap {
+        if app.user.mode == Mode::Minimal {
+            if app.sector_error.is_some() {
+                "E03 / cached".into()
+            } else {
+                format!("s={}s", app.config.refresh.sectors_secs)
+            }
+        } else if let Some(error) = &app.sector_error {
+            error.clone()
+        } else {
+            "全市场板块 · 新浪分类 · 平均涨跌幅 · 数据源不提供行情时间戳".into()
         }
     } else if app.user.mode == Mode::Minimal {
         if app.quote_error.is_some() {
@@ -168,10 +164,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
             .wrap(Wrap { trim: true }),
         outer[3],
     );
-    let keys = if app.user.mode == Mode::Minimal {
+    let keys = if app.user.heatmap {
+        if app.user.mode == Mode::Minimal {
+            "m mode  h table     Tab type  n/p page  s sort  mouse  , cfg  ?  q"
+        } else {
+            "m 简约  h 自选行情   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  , 设置  ? 帮助  q 退出"
+        }
+    } else if app.user.mode == Mode::Minimal {
         "m mode  h view  [] group  / find  a add  g groups  , cfg  ?  q"
     } else {
-        "m 简约  h 热力图  [] 分组  ↑↓ 选股  ←→ 周期  / 搜索  a 添加  g 分组  , 设置  ? 帮助  q 退出"
+        "m 简约  h 大盘云图  [] 分组  ↑↓ 选股  ←→ 周期  / 搜索  a 添加  g 分组  , 设置  ? 帮助  q 退出"
     };
     frame.render_widget(
         Paragraph::new(keys).style(Style::default().fg(p.dim)),
@@ -525,7 +527,7 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .map(|id| {
             let q = app.quotes.get(id);
             Row::new([
-                app.user.alias(id),
+                id.clone(),
                 q.map(|q| q.price.to_string())
                     .unwrap_or_else(|| "--".into()),
                 q.map(|q| format!("{:+.2}", q.percent()))
@@ -538,26 +540,21 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(7),
-            Constraint::Length(16),
+            Constraint::Length(9),
+            Constraint::Length(14),
             Constraint::Length(12),
             Constraint::Min(8),
         ],
     )
-    .header(Row::new(["id", "value", "delta%", "age(s)"]).style(Style::default().fg(p.dim)))
+    .header(Row::new(["code", "value", "delta%", "age(s)"]).style(Style::default().fg(p.dim)))
     .row_highlight_style(Style::default().bg(p.selected));
     let mut state = TableState::default().with_selected(
         ids.iter()
             .position(|id| Some(id) == app.user.selected.as_ref()),
     );
     f.render_stateful_widget(table, areas[0], &mut state);
-    let alias = app
-        .user
-        .selected
-        .as_ref()
-        .map(|id| app.user.alias(id))
-        .unwrap_or_default();
-    let mut samples = vec![format!("{alias} / {}", app.user.period.key())];
+    let code = app.user.selected.clone().unwrap_or_default();
+    let mut samples = vec![format!("{code} / {}", app.user.period.key())];
     if let Some(s) = app.series() {
         let n = s.points.len();
         if n > 0 {
@@ -581,127 +578,173 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         areas[1],
     );
 }
+fn cloud_tabs(f: &mut Frame, app: &App, r: Rect, p: Palette) {
+    let mut spans = [
+        crate::sectors::Category::Industry,
+        crate::sectors::Category::Concept,
+    ]
+    .into_iter()
+    .flat_map(|category| {
+        let selected = category == app.user.sector_category;
+        let label = format!(" {}板块 ", category.label());
+        [
+            Span::styled(
+                label,
+                Style::default()
+                    .fg(if selected { p.accent } else { p.dim })
+                    .bg(if selected { p.selected } else { p.bg }),
+            ),
+            text(" ", p.dim),
+        ]
+    })
+    .collect::<Vec<_>>();
+    spans.push(text(
+        format!("[s {}]", app.user.sector_sort.label()),
+        p.accent,
+    ));
+    f.render_widget(Paragraph::new(Line::from(spans)), r);
+}
 fn heatmap(f: &mut Frame, app: &App, r: Rect, p: Palette) {
-    let ids = app.visible();
-    if ids.is_empty() {
+    let quiet = app.user.mode == Mode::Minimal;
+    let Some(snapshot) = app.sector_snapshot().filter(|s| !s.sectors.is_empty()) else {
         f.render_widget(
-            Paragraph::new(if app.user.mode == Mode::Minimal {
-                "0 rows"
+            Paragraph::new(if quiet {
+                "-- / loading"
+            } else if app.sector_error.is_some() {
+                "暂无全市场板块数据。请检查网络/代理；不会用自选股票替代。"
             } else {
-                "当前分组暂无股票，按 a 添加"
-            }),
-            r,
-        );
-        return;
-    }
-    if app.user.mode == Mode::Minimal {
-        let rows = ids
-            .iter()
-            .map(|id| {
-                let q = app.quotes.get(id);
-                Row::new([
-                    app.user.alias(id),
-                    q.map(|q| format!("{:+.2}", q.percent()))
-                        .unwrap_or_else(|| "--".into()),
-                    q.map(|q| q.price.to_string())
-                        .unwrap_or_else(|| "--".into()),
-                    q.map(|q| q.age_secs().to_string())
-                        .unwrap_or_else(|| "--".into()),
-                ])
+                "正在加载全市场板块…"
             })
-            .collect::<Vec<_>>();
-        let mut state = TableState::default().with_selected(
-            ids.iter()
-                .position(|id| Some(id) == app.user.selected.as_ref()),
-        );
-        f.render_stateful_widget(
-            Table::new(
-                rows,
-                [
-                    Constraint::Length(7),
-                    Constraint::Length(12),
-                    Constraint::Length(16),
-                    Constraint::Min(8),
-                ],
-            )
-            .header(Row::new(["id", "delta%", "value", "age(s)"]).style(Style::default().fg(p.dim)))
-            .row_highlight_style(Style::default().bg(p.selected)),
+            .style(Style::default().fg(p.dim))
+            .wrap(Wrap { trim: false }),
             r,
-            &mut state,
         );
         return;
-    }
-    let rows_area = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(r);
-    let columns = (r.width / 23).clamp(1, 4) as usize;
-    let max_rows = (rows_area[0].height / 5).max(1) as usize;
-    let page_size = columns * max_rows;
-    let selected = ids
-        .iter()
-        .position(|id| Some(id) == app.user.selected.as_ref())
-        .unwrap_or(0);
+    };
+    let sectors = &snapshot.sectors;
+    let selected = app.sector_index.min(sectors.len() - 1);
+    let (columns, page_size) = App::cloud_dimensions(r.width, r.height, app.user.mode);
     let start = selected / page_size * page_size;
-    let page = &ids[start..ids.len().min(start + page_size)];
-    let row_count = page.len().div_ceil(columns);
-    let bands = Layout::vertical(vec![Constraint::Ratio(1, row_count as u32); row_count])
-        .split(rows_area[0]);
-    for (i, chunk) in page.chunks(columns).enumerate() {
-        let cells = Layout::horizontal(vec![Constraint::Ratio(1, columns as u32); columns])
-            .spacing(1)
-            .split(bands[i]);
-        for (j, id) in chunk.iter().enumerate() {
-            let q = app.quotes.get(id);
-            let pct = q.map(|q| q.percent());
-            let intensity = (pct.unwrap_or(0.).abs() / 5.).min(1.);
-            let bg = if pct.unwrap_or(0.) > 0. {
-                Color::Rgb((53. + intensity * 52.) as u8, 33, 39)
-            } else if pct.unwrap_or(0.) < 0. {
-                Color::Rgb(25, (48. + intensity * 38.) as u8, 43)
-            } else {
-                p.selected
-            };
-            let name = app
-                .catalog
-                .iter()
-                .find(|s| &s.id == id)
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| id.clone());
-            let label = vec![
-                Line::from(name),
-                Line::from(Span::styled(
-                    pct.map(|n| format!("{n:+.2}%"))
-                        .unwrap_or_else(|| "--".into()),
-                    Style::default().add_modifier(Modifier::BOLD),
-                )),
-                Line::from(text(
-                    format!(
-                        "{}  {}",
-                        id.get(2..).unwrap_or(id),
-                        q.map(age).unwrap_or_default()
-                    ),
-                    p.dim,
-                )),
-            ];
-            let b = Block::default()
-                .borders(if Some(id) == app.user.selected.as_ref() {
-                    Borders::ALL
+    let end = sectors.len().min(start + page_size);
+    let areas = cloud_areas(r);
+    let gainers = sectors
+        .iter()
+        .filter(|s| s.change_pct.is_some_and(|v| v > 0.))
+        .count();
+    let losers = sectors
+        .iter()
+        .filter(|s| s.change_pct.is_some_and(|v| v < 0.))
+        .count();
+    let summary = if quiet {
+        format!(
+            "[ prev ][ next ] matrix {}/{} / {} / {} rows / {}-{}",
+            start / page_size + 1,
+            sectors.len().div_ceil(page_size),
+            snapshot.category.label(),
+            sectors.len(),
+            start + 1,
+            end
+        )
+    } else {
+        format!(
+            "[ 上页 ][ 下页 ] 第 {}/{} 页 · 大盘云图 · 全部{}板块 {} · 上涨 {} / 下跌 {}",
+            start / page_size + 1,
+            sectors.len().div_ceil(page_size),
+            snapshot.category.label(),
+            sectors.len(),
+            gainers,
+            losers
+        )
+    };
+    f.render_widget(
+        Paragraph::new(summary).style(Style::default().fg(p.dim)),
+        areas[0],
+    );
+    let visible = &sectors[start..end];
+    let cells = cloud_tiles(areas[1], visible, app.user.mode, columns);
+    for (offset, (sector, cell)) in visible.iter().zip(cells).enumerate() {
+        let index = start + offset;
+        let active = index == selected;
+        let percent = sector
+            .change_pct
+            .map(|v| format!("{v:+.2}%"))
+            .unwrap_or_else(|| "--".into());
+        if quiet {
+            let name = fit_label(&sector.name, cell.width.saturating_sub(14) as usize);
+            f.render_widget(
+                Paragraph::new(format!(
+                    "{}{:03} {} {:>7}",
+                    if active { ">" } else { " " },
+                    index + 1,
+                    name,
+                    percent
+                ))
+                .style(Style::default().fg(p.fg).bg(if active {
+                    p.selected
                 } else {
-                    Borders::NONE
-                })
-                .border_style(Style::default().fg(p.accent))
-                .padding(ratatui::widgets::Padding::uniform(1))
-                .style(Style::default().bg(bg));
-            f.render_widget(Paragraph::new(label).block(b), cells[j]);
+                    p.bg
+                })),
+                cell,
+            );
+        } else {
+            render_cloud_tile(f, sector, cell, active, p);
         }
     }
+    let sector = &sectors[selected];
+    let retrieved = snapshot
+        .fetched_at
+        .with_timezone(&chrono::FixedOffset::east_opt(28800).unwrap())
+        .format("%m-%d %H:%M:%S");
+    let stale = (chrono::Utc::now() - snapshot.fetched_at).num_seconds()
+        > (app.config.refresh.sectors_secs * 2) as i64;
+    let detail = if quiet {
+        format!(
+            "{:03}  {}  {}  {}  {}s",
+            selected + 1,
+            sector.name,
+            sector
+                .change_pct
+                .map(|v| format!("{v:+.2}"))
+                .unwrap_or_else(|| "--".into()),
+            sector.stock_count,
+            (chrono::Utc::now() - snapshot.fetched_at)
+                .num_seconds()
+                .max(0)
+        )
+    } else {
+        format!(
+            "{}  {}  平均涨跌 {}  成分股 {}",
+            sector.name,
+            sector.code,
+            sector
+                .change_pct
+                .map(|v| format!("{v:+.2}%"))
+                .unwrap_or_else(|| "--".into()),
+            sector.stock_count
+        )
+    };
+    let source = if quiet {
+        format!(
+            "{} / {}",
+            if app.demo { "sample" } else { "sina" },
+            if stale { "cached" } else { "snapshot" }
+        )
+    } else {
+        format!(
+            "{} · 获取 {}{} · 本页面积=成分股数，非市值",
+            if app.demo {
+                "演示数据"
+            } else {
+                "新浪板块"
+            },
+            retrieved,
+            if stale { " · 缓存" } else { "" }
+        )
+    };
     f.render_widget(
-        Paragraph::new(format!(
-            "自选分组涨跌 · 等面积 / 非板块指数 · 较昨收 · {}–{} / {}",
-            start + 1,
-            start + page.len(),
-            ids.len()
-        ))
-        .style(Style::default().fg(p.dim)),
-        rows_area[1],
+        Paragraph::new(vec![Line::from(detail), Line::from(source)])
+            .style(Style::default().fg(p.dim)),
+        areas[2],
     );
 }
 fn centered(r: Rect, width: u16, height: u16) -> Rect {
@@ -773,19 +816,35 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         Modal::Help { offset } => {
             let body = vec![
                 "↑↓ / PgUp/PgDn 滚动帮助；Esc 返回",
-                "m 完整/简约    h 行情/热力图    [ ] 切换分组",
+                "m 完整/简约    h 行情/大盘云图    [ ] 自选分组",
                 "↑↓ 选择股票   ←→ 日内/1周/1月   j/k 走势游标",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
                 "g 分组管理（n 新建 / r 重命名 / d 删除）",
                 ", 设置  Space 暂停显示  Esc 返回  q 退出",
                 "搜索输入中文/代码/拼音/首字母；Ctrl+a 加入分组",
-                "简约：id=固定编号；value=价格；delta%=较昨收",
-                "age(s)=源报价距现在秒数；E01 报价失败 / E02 走势失败",
+                "简约：code=股票代码；value=价格；delta%=较昨收",
+                "age(s)=源报价年龄；E01 报价 / E02 走势 / E03 板块失败",
+                "云图：Tab 分类，方向键选择，PgUp/PgDn 或 n/p 翻页；鼠标点击/滚轮",
+                "云图：s 切换涨幅/跌幅/规模排序；规模=成分股数。",
+                "云图按新浪平均涨跌幅着色，板块可重叠，不可累加。",
                 "暂停只冻结显示，后台继续接收；恢复显示最新数据。",
                 "红涨绿跌；免费源时效不保证，休市仍显示最后快照。",
             ];
             let mut lines: Vec<Line> = body.into_iter().map(Line::raw).collect();
             lines.push(Line::raw(""));
+            if app.user.heatmap {
+                lines.push(Line::from(text("板块序号映射（按当前排序）", p.accent)));
+                if let Some(snapshot) = app.sector_snapshot() {
+                    for (i, sector) in snapshot.sectors.iter().enumerate() {
+                        lines.push(Line::raw(format!(
+                            "{:03}  {}  {}",
+                            i + 1,
+                            sector.code,
+                            sector.name
+                        )));
+                    }
+                }
+            }
             lines.push(Line::from(text("自选映射（当前分组优先）", p.accent)));
             let mut ids = app.visible();
             ids.extend(
@@ -970,6 +1029,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "代理策略",
                 "代理地址",
                 "请求超时(s)",
+                "板块间隔(s)",
             ];
             let mut lines = vec![
                 Line::from(text(
@@ -1042,5 +1102,280 @@ pub fn redact_proxy(raw: &str) -> String {
         }
     } else {
         raw.into()
+    }
+}
+
+fn outer_layout(area: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Min(6),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
+        .margin(1)
+        .split(area)
+}
+
+/// Hit testing uses the same tile allocations as the renderer.
+pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, height: u16) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+    use ratatui::layout::Position;
+    if app.modal.is_some() || width < 46 || height < 16 {
+        return;
+    }
+    app.set_viewport(width, height);
+    let outer = outer_layout(Rect::new(0, 0, width, height));
+    let point = Position::new(event.column, event.row);
+    let key = match event.kind {
+        MouseEventKind::Moved if app.user.heatmap => {
+            select_cloud_at(app, outer[2], point);
+            None
+        }
+        MouseEventKind::ScrollDown if app.user.heatmap && outer[2].contains(point) => {
+            Some(KeyCode::PageDown)
+        }
+        MouseEventKind::ScrollUp if app.user.heatmap && outer[2].contains(point) => {
+            Some(KeyCode::PageUp)
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if outer[4].contains(point) {
+                if event.column < outer[4].x + 8 {
+                    Some(KeyCode::Char('m'))
+                } else if event.column < outer[4].x + 20 {
+                    Some(KeyCode::Char('h'))
+                } else {
+                    None
+                }
+            } else if app.user.heatmap && outer[1].contains(point) {
+                let relative = event.column - outer[1].x;
+                let tab_width = 11;
+                if relative < tab_width * 2 {
+                    let category = if relative < tab_width {
+                        crate::sectors::Category::Industry
+                    } else {
+                        crate::sectors::Category::Concept
+                    };
+                    (category != app.user.sector_category).then_some(KeyCode::Tab)
+                } else if relative < tab_width * 2 + 10 {
+                    Some(KeyCode::Char('s'))
+                } else {
+                    None
+                }
+            } else if app.user.heatmap && outer[2].contains(point) {
+                let r = outer[2];
+                if event.row == r.y {
+                    if event.column < r.x + 8 {
+                        Some(KeyCode::PageUp)
+                    } else if event.column < r.x + 16 {
+                        Some(KeyCode::PageDown)
+                    } else {
+                        None
+                    }
+                } else {
+                    select_cloud_at(app, r, point);
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if let Some(code) = key {
+        app.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+}
+
+fn select_cloud_at(app: &mut App, r: Rect, point: ratatui::layout::Position) {
+    let Some(snapshot) = app.sector_snapshot() else {
+        return;
+    };
+    let count = snapshot.sectors.len();
+    if count == 0 {
+        return;
+    }
+    let (columns, page_size) = App::cloud_dimensions(r.width, r.height, app.user.mode);
+    let start = app.sector_index.min(count - 1) / page_size * page_size;
+    let end = count.min(start + page_size);
+    let cells = cloud_tiles(
+        cloud_areas(r)[1],
+        &snapshot.sectors[start..end],
+        app.user.mode,
+        columns,
+    );
+    if let Some(offset) = cells.iter().position(|cell| cell.contains(point)) {
+        let index = start + offset;
+        if app.sector_index != index {
+            app.sector_index = index;
+            app.dirty = true;
+            app.message.clear();
+        }
+    }
+}
+
+fn render_cloud_tile(
+    f: &mut Frame,
+    sector: &crate::sectors::Sector,
+    cell: Rect,
+    active: bool,
+    p: Palette,
+) {
+    let pct = sector.change_pct.unwrap_or(0.);
+    let intensity = (pct.abs() / 5.).min(1.);
+    let background = if pct > 0. {
+        Color::Rgb((53. + intensity * 52.) as u8, 33, 39)
+    } else if pct < 0. {
+        Color::Rgb(25, (48. + intensity * 38.) as u8, 43)
+    } else {
+        p.selected
+    };
+    f.render_widget(Block::default().style(Style::default().bg(p.bg)), cell);
+    let tile = Rect::new(
+        cell.x,
+        cell.y,
+        cell.width.saturating_sub(u16::from(cell.width >= 3)),
+        cell.height.saturating_sub(u16::from(cell.height >= 3)),
+    );
+    let name = fit_label(&sector.name, tile.width.saturating_sub(1) as usize)
+        .trim_end()
+        .to_owned();
+    let mut lines = vec![Line::styled(
+        format!("{}{name}", if active { "▎" } else { " " }),
+        Style::default()
+            .fg(if active { p.accent } else { p.fg })
+            .add_modifier(Modifier::BOLD),
+    )];
+    let percent = sector
+        .change_pct
+        .map(|v| format!("{v:+.2}%"))
+        .unwrap_or_else(|| "--".into());
+    if tile.height >= 2 && tile.width as usize > percent.width() {
+        lines.push(Line::raw(format!(" {percent}")));
+    }
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(background).fg(p.fg)),
+        tile,
+    );
+}
+
+fn cloud_areas(r: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(2),
+        Constraint::Length(2),
+    ])
+    .split(r)
+}
+
+/// Ordered weighted rows share geometry between rendering and mouse input.
+fn cloud_tiles(
+    r: Rect,
+    sectors: &[crate::sectors::Sector],
+    mode: Mode,
+    columns: usize,
+) -> Vec<Rect> {
+    if mode == Mode::Minimal {
+        let rows =
+            Layout::vertical(vec![Constraint::Length(1); sectors.len().div_ceil(columns)]).split(r);
+        return rows
+            .iter()
+            .flat_map(|row| {
+                Layout::horizontal(vec![Constraint::Ratio(1, columns as u32); columns])
+                    .spacing(1)
+                    .split(*row)
+                    .to_vec()
+            })
+            .take(sectors.len())
+            .collect();
+    }
+    if sectors.is_empty() {
+        return Vec::new();
+    }
+    let weights: Vec<u64> = sectors
+        .iter()
+        .map(|s| u64::from(s.stock_count.max(1)))
+        .collect();
+    let row_weights: Vec<u64> = weights
+        .chunks(columns)
+        .map(|row| row.iter().sum())
+        .collect();
+    let rows = Layout::vertical(
+        proportional_lengths(&row_weights, r.height)
+            .into_iter()
+            .map(Constraint::Length)
+            .collect::<Vec<_>>(),
+    )
+    .split(r);
+    let mut result = Vec::with_capacity(sectors.len());
+    for (row, weights) in weights.chunks(columns).enumerate() {
+        result.extend(
+            Layout::horizontal(
+                proportional_lengths(weights, r.width)
+                    .into_iter()
+                    .map(Constraint::Length)
+                    .collect::<Vec<_>>(),
+            )
+            .split(rows[row])
+            .iter()
+            .copied(),
+        );
+    }
+    result
+}
+
+fn proportional_lengths(weights: &[u64], size: u16) -> Vec<u16> {
+    let total: u64 = weights.iter().sum();
+    let mut previous = 0;
+    let mut cumulative = 0;
+    weights
+        .iter()
+        .map(|weight| {
+            cumulative += weight;
+            let boundary = ((cumulative * u64::from(size) + total / 2) / total) as u16;
+            let length = boundary - previous;
+            previous = boundary;
+            length
+        })
+        .collect()
+}
+
+// Measure display columns, so Chinese names cannot crowd out the numeric value.
+fn fit_label(name: &str, width: usize) -> String {
+    if name.width() <= width {
+        return format!("{}{}", name, " ".repeat(width - name.width()));
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut label = String::new();
+    for ch in name.chars() {
+        if label.width() + unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) > width - 1 {
+            break;
+        }
+        label.push(ch);
+    }
+    label.push('…');
+    label.push_str(&" ".repeat(width - label.width()));
+    label
+}
+
+#[cfg(test)]
+mod cloud_tests {
+    use super::*;
+    #[test]
+    fn treemap_uses_constituent_weights_and_covers_area_without_overlap() {
+        let mut sectors = crate::sectors::demo(crate::sectors::Category::Industry).sectors;
+        sectors.truncate(2);
+        sectors[0].stock_count = 30;
+        sectors[1].stock_count = 10;
+        let area = Rect::new(1, 7, 80, 10);
+        let tiles = cloud_tiles(area, &sectors, Mode::Full, 5);
+        assert_eq!(tiles[0].area(), 600);
+        assert_eq!(tiles[1].area(), 200);
+        assert_eq!(tiles[0].intersection(tiles[1]).area(), 0);
+        assert_eq!(tiles.iter().map(|r| r.area()).sum::<u32>(), area.area());
     }
 }

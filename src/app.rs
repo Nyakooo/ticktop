@@ -58,6 +58,11 @@ pub struct App {
     pub quote_error: Option<String>,
     pub chart_error: Option<String>,
     pub catalog_error: Option<String>,
+    pub sectors: HashMap<crate::sectors::Category, crate::sectors::Snapshot>,
+    pub sector_error: Option<String>,
+    pub sector_index: usize,
+    pub cloud_columns: usize,
+    pub cloud_page_size: usize,
     pub demo: bool,
     pub paused: bool,
     pub quit: bool,
@@ -67,6 +72,7 @@ pub struct App {
     pub chart_cursor: Option<usize>,
     pending_quotes: Option<Vec<Quote>>,
     pending_charts: Vec<Series>,
+    pending_sectors: HashMap<crate::sectors::Category, crate::sectors::Snapshot>,
 }
 impl App {
     pub fn new(config: Config, paths: Paths, first: bool, demo: bool) -> Result<Self> {
@@ -81,19 +87,35 @@ impl App {
         let catalog_as_of = catalog.as_of;
         let catalog = catalog.stocks;
         let search = SearchIndex::new(&catalog);
-        let mut user = UserState::load(&paths.data.join(if demo {
+        let state_path = paths.data.join(if demo {
             "demo-state.json"
         } else {
             "state.json"
-        }))?;
-        if first {
+        });
+        let has_saved_state = state_path.exists();
+        let mut user = UserState::load(&state_path)?;
+        if !has_saved_state {
             user.mode = config.default_mode;
         }
+        let welcome = first && !has_saved_state;
+        let welcome_selection = usize::from(user.mode == Mode::Minimal);
         let quotes = cache
             .quotes()?
             .into_iter()
             .map(|q| (q.id.clone(), q))
             .collect();
+        let mut sectors = HashMap::new();
+        for category in [
+            crate::sectors::Category::Industry,
+            crate::sectors::Category::Concept,
+        ] {
+            if let Some(mut snapshot) =
+                cache.read::<crate::sectors::Snapshot>(&format!("sectors:{}", category.key()))?
+            {
+                user.sector_sort.apply(&mut snapshot.sectors);
+                sectors.insert(category, snapshot);
+            }
+        }
         let mut app = Self {
             saved_config: config.clone(),
             config,
@@ -105,11 +127,20 @@ impl App {
             search,
             quotes,
             charts: HashMap::new(),
-            modal: if first { Some(Modal::Welcome(0)) } else { None },
+            modal: if welcome {
+                Some(Modal::Welcome(welcome_selection))
+            } else {
+                None
+            },
             message: String::new(),
             quote_error: None,
             chart_error: None,
             catalog_error: None,
+            sectors,
+            sector_error: None,
+            sector_index: 0,
+            cloud_columns: 8,
+            cloud_page_size: 88,
             demo,
             paused: false,
             quit: false,
@@ -119,6 +150,7 @@ impl App {
             chart_cursor: None,
             pending_quotes: None,
             pending_charts: Vec::new(),
+            pending_sectors: HashMap::new(),
         };
         app.ensure_selection();
         app.load_chart();
@@ -138,6 +170,8 @@ impl App {
             period: self.user.period,
             demo: self.demo,
             catalog_as_of: self.catalog_as_of.clone(),
+            heatmap_enabled: self.user.heatmap,
+            sector_category: self.user.sector_category,
         }
     }
     pub fn persist(&self) -> Result<()> {
@@ -154,6 +188,13 @@ impl App {
         self.saved_config = saved;
         self.config.default_mode = self.user.mode;
         Ok(())
+    }
+    /// Persist the display choice immediately, without saving temporary network overrides.
+    pub fn remember_mode(&mut self) {
+        let state_saved = self.save_state_change();
+        if self.save_default_mode().is_err() && state_saved {
+            self.message = "显示模式已记录，但默认配置保存失败".into();
+        }
     }
     pub fn flush_state(&mut self) -> bool {
         match self.persist() {
@@ -172,6 +213,116 @@ impl App {
     fn save_state_change(&mut self) -> bool {
         self.state_dirty = true;
         self.flush_state()
+    }
+    pub fn sector_snapshot(&self) -> Option<&crate::sectors::Snapshot> {
+        self.sectors.get(&self.user.sector_category)
+    }
+    pub fn cloud_dimensions(width: u16, height: u16, mode: Mode) -> (usize, usize) {
+        let minimal = mode == Mode::Minimal;
+        let columns = (width / if minimal { 32 } else { 16 }).clamp(1, 12) as usize;
+        let rows = (height.saturating_sub(4) / if minimal { 1 } else { 2 }).max(1) as usize;
+        let rows = if minimal { rows } else { rows.min(3) };
+        (columns, columns * rows)
+    }
+    pub fn set_viewport(&mut self, width: u16, height: u16) {
+        (self.cloud_columns, self.cloud_page_size) = Self::cloud_dimensions(
+            width.saturating_sub(2),
+            height.saturating_sub(9),
+            self.user.mode,
+        );
+    }
+    fn apply_sectors(&mut self, mut snapshot: crate::sectors::Snapshot) {
+        self.user.sector_sort.apply(&mut snapshot.sectors);
+        if snapshot.category == self.user.sector_category {
+            let previous = self
+                .sector_snapshot()
+                .and_then(|s| s.selected(self.sector_index))
+                .map(|s| s.code.clone());
+            self.sector_index = previous
+                .and_then(|id| snapshot.sectors.iter().position(|s| s.code == id))
+                .unwrap_or(0);
+        }
+        self.sectors.insert(snapshot.category, snapshot);
+    }
+    fn cloud_key(&mut self, key: KeyCode) -> bool {
+        let count = self.sector_snapshot().map(|s| s.sectors.len()).unwrap_or(0);
+        match key {
+            KeyCode::Char('s') => {
+                self.user.sector_sort = self.user.sector_sort.next();
+                for snapshot in self.sectors.values_mut() {
+                    self.user.sector_sort.apply(&mut snapshot.sectors);
+                }
+                self.sector_index = 0;
+                self.state_dirty = true;
+                self.flush_state();
+            }
+            KeyCode::Tab => {
+                self.user.sector_category = self.user.sector_category.next();
+                self.sector_index = 0;
+                self.sector_error = None;
+                self.state_dirty = true;
+                self.request_dirty = true;
+            }
+            KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Char('n' | 'p')
+            | KeyCode::Home
+            | KeyCode::End => {
+                if count == 0 {
+                    return true;
+                }
+                self.sector_index = self.sector_index.min(count - 1);
+                self.sector_index = match key {
+                    KeyCode::Left => self.sector_index.saturating_sub(1),
+                    KeyCode::Right => (self.sector_index + 1).min(count - 1),
+                    KeyCode::Up => self.sector_index.saturating_sub(self.cloud_columns),
+                    KeyCode::Down => (self.sector_index + self.cloud_columns).min(count - 1),
+                    KeyCode::PageUp | KeyCode::Char('p') => {
+                        let page = self.sector_index / self.cloud_page_size;
+                        if page == 0 {
+                            self.message = if self.user.mode == Mode::Minimal {
+                                "1 / first"
+                            } else {
+                                "已是第一页；Tab 切换行业/概念"
+                            }
+                            .into();
+                            self.sector_index
+                        } else {
+                            (page - 1) * self.cloud_page_size
+                        }
+                    }
+                    KeyCode::PageDown | KeyCode::Char('n') => {
+                        let page = self.sector_index / self.cloud_page_size;
+                        if (page + 1) * self.cloud_page_size >= count {
+                            self.message = if self.user.mode == Mode::Minimal {
+                                "end / last"
+                            } else {
+                                "已是最后一页；Tab 切换行业/概念"
+                            }
+                            .into();
+                            self.sector_index
+                        } else {
+                            (page + 1) * self.cloud_page_size
+                        }
+                    }
+                    KeyCode::Home => 0,
+                    _ => count - 1,
+                };
+            }
+            KeyCode::Char('[' | ']' | 'a' | 'd' | 'g' | '/' | 'j' | 'k') => {
+                self.message = if self.user.mode == Mode::Minimal {
+                    "h / table".into()
+                } else {
+                    "按 h 返回自选行情后管理股票；Tab 切换行业/概念".into()
+                };
+            }
+            _ => return false,
+        }
+        true
     }
     pub fn selected_stock(&self) -> Option<&Instrument> {
         self.user
@@ -273,6 +424,23 @@ impl App {
                     self.charts.insert((s.id.clone(), s.period), s);
                 }
             }
+            MarketEvent::Sectors(snapshot) => {
+                if snapshot.category == self.user.sector_category {
+                    self.sector_error = None;
+                }
+                if self
+                    .cache
+                    .write(&format!("sectors:{}", snapshot.category.key()), &snapshot)
+                    .is_err()
+                {
+                    self.message = "板块缓存保存失败".into();
+                }
+                if self.paused {
+                    self.pending_sectors.insert(snapshot.category, snapshot);
+                } else {
+                    self.apply_sectors(snapshot);
+                }
+            }
             MarketEvent::Catalog(catalog) => {
                 if self.cache.write("catalog", &catalog).is_err() {
                     self.message = "搜索索引缓存写入失败".into();
@@ -291,6 +459,7 @@ impl App {
                 match kind {
                     Kind::Quotes => self.quote_error = Some(msg),
                     Kind::Chart => self.chart_error = Some(msg),
+                    Kind::Sectors => self.sector_error = Some(msg),
                     Kind::Catalog => {
                         self.catalog_error = Some("名单更新失败，继续使用本地索引".into())
                     }
@@ -309,6 +478,9 @@ impl App {
             }
             for s in self.pending_charts.drain(..) {
                 self.charts.insert((s.id.clone(), s.period), s);
+            }
+            for (_, snapshot) in std::mem::take(&mut self.pending_sectors) {
+                self.apply_sectors(snapshot);
             }
         }
     }
@@ -354,6 +526,9 @@ impl App {
             self.handle_modal(modal, key);
             return;
         }
+        if self.user.heatmap && self.cloud_key(key.code) {
+            return;
+        }
         let previous = (
             self.user.mode,
             self.user.heatmap,
@@ -370,7 +545,10 @@ impl App {
                     Mode::Full
                 }
             }
-            KeyCode::Char('h') => self.user.heatmap = !self.user.heatmap,
+            KeyCode::Char('h') => {
+                self.user.heatmap = !self.user.heatmap;
+                self.request_dirty = true;
+            }
             KeyCode::Char(' ') => self.toggle_pause(),
             KeyCode::Char('/') => self.open_search(false),
             KeyCode::Char('a') => self.open_search(true),
@@ -466,7 +644,11 @@ impl App {
                 self.user.period,
             )
         {
-            self.state_dirty = true;
+            if previous.0 != self.user.mode {
+                self.remember_mode();
+            } else {
+                self.state_dirty = true;
+            }
         }
     }
     fn handle_modal(&mut self, modal: Modal, key: KeyEvent) {
@@ -483,13 +665,21 @@ impl App {
                 match key.code {
                     KeyCode::Char('?') => return,
                     KeyCode::Down => {
-                        offset = (offset + 1)
-                            .min(self.user.watchlist.len() + self.user.groups.len() + 12)
+                        offset = (offset + 1).min(
+                            self.user.watchlist.len()
+                                + self.user.groups.len()
+                                + self.sector_snapshot().map_or(0, |s| s.sectors.len())
+                                + 16,
+                        )
                     }
                     KeyCode::Up => offset = offset.saturating_sub(1),
                     KeyCode::PageDown => {
-                        offset = (offset + 10)
-                            .min(self.user.watchlist.len() + self.user.groups.len() + 12)
+                        offset = (offset + 10).min(
+                            self.user.watchlist.len()
+                                + self.user.groups.len()
+                                + self.sector_snapshot().map_or(0, |s| s.sectors.len())
+                                + 16,
+                        )
                     }
                     KeyCode::PageUp => offset = offset.saturating_sub(10),
                     _ => {}
@@ -703,11 +893,11 @@ impl App {
                             + if key.code == KeyCode::BackTab
                                 || key.modifiers.contains(KeyModifiers::SHIFT)
                             {
-                                4
+                                5
                             } else {
                                 1
                             })
-                            % 5;
+                            % 6;
                         input = field_value(&draft, field);
                         Some(Modal::Settings {
                             draft,
@@ -751,7 +941,8 @@ pub fn field_value(c: &Config, field: usize) -> String {
         }
         .into(),
         3 => c.network.proxy_url.clone(),
-        _ => c.network.timeout_secs.to_string(),
+        4 => c.network.timeout_secs.to_string(),
+        _ => c.refresh.sectors_secs.to_string(),
     }
 }
 fn apply_field(c: &mut Config, field: usize, input: &str) -> Result<()> {
@@ -773,6 +964,10 @@ fn apply_field(c: &mut Config, field: usize, input: &str) -> Result<()> {
             }
         }
         3 => c.network.proxy_url = input.trim().into(),
+        5 => {
+            c.refresh.sectors_secs =
+                crate::config::parse_interval(input).map_err(anyhow::Error::msg)?
+        }
         _ => {
             let n = input
                 .parse::<u64>()

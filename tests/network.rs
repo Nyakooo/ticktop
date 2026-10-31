@@ -180,3 +180,26 @@ async fn environment_no_proxy_exclusion_is_respected() {
     assert_eq!(body, "ok");
     task.join().unwrap();
 }
+
+#[test]
+fn unused_all_proxy_does_not_block_explicit_http_and_https_proxies() {
+    let result = market::system_proxies(|name| {
+        Ok(match name {
+            "HTTP_PROXY" | "HTTPS_PROXY" => Some("http://localhost:7890".into()),
+            "ALL_PROXY" => Some("socks://localhost:1080".into()),
+            _ => None,
+        })
+    });
+    assert!(result.is_ok());
+    let applicable = market::system_proxies(|name| {
+        Ok(match name {
+            "HTTPS_PROXY" => Some("http://localhost:7890".into()),
+            "ALL_PROXY" => Some("socks://localhost:1080".into()),
+            _ => None,
+        })
+    });
+    assert!(
+        applicable.is_err(),
+        "an applicable malformed ALL_PROXY must still block requests"
+    );
+}

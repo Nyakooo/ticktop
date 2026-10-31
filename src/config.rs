@@ -99,12 +99,14 @@ impl std::fmt::Debug for Network {
 pub struct Refresh {
     pub quotes_secs: u64,
     pub chart_secs: u64,
+    pub sectors_secs: u64,
 }
 impl Default for Refresh {
     fn default() -> Self {
         Self {
             quotes_secs: 5,
             chart_secs: 15,
+            sectors_secs: 30,
         }
     }
 }
@@ -119,6 +121,7 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if !(2..=3600).contains(&self.refresh.quotes_secs)
             || !(2..=3600).contains(&self.refresh.chart_secs)
+            || !(2..=3600).contains(&self.refresh.sectors_secs)
         {
             bail!("请求间隔必须为 2–3600 秒");
         }

@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="800" viewBox="0 0 1600 800" role="img" aria-labelledby="title desc">
+<title id="title">Ticktop — 终端行情看板</title>
+<desc id="desc">支持自选分组、行情走势、板块云图和完整简约两种模式。Linux 与 macOS，Rust 编写，MIT 许可。右侧为界面示意，非实时行情。</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#101b1b"/><stop offset="1" stop-color="#090f13"/></linearGradient><linearGradient id="chart" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#9bd4b8" stop-opacity=".16"/><stop offset="1" stop-color="#9bd4b8" stop-opacity="0"/></linearGradient><filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000" flood-opacity=".35"/></filter></defs>
+<rect x="0" y="0" width="1600" height="800" rx="0" fill="url(#bg)"/>
+<circle cx="1440" cy="60" r="530" fill="#91cdb0" opacity=".026"/>
+<path d="M650 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M740 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M830 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M920 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M1010 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M1100 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M1190 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M1280 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M1370 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M1460 50V730" stroke="#668c80" opacity=".045"/>
+<path d="M630 65H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 155H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 245H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 335H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 425H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 515H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 605H1550" stroke="#668c80" opacity=".045"/>
+<path d="M630 695H1550" stroke="#668c80" opacity=".045"/>
+<rect x="1" y="1" width="1598" height="798" rx="20" fill="none" stroke="#253832"/>
+<rect x="72" y="68" width="7" height="37" rx="2" fill="#a6d6b9"/>
+<text x="95" y="103" font-family="DejaVu Sans Mono,monospace" font-size="42" font-weight="700" fill="#e2eee6" >T</text>
+<rect x="128" y="96" width="17" height="6" rx="1" fill="#a6d6b9"/>
+<text x="74" y="164" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="500" fill="#6e8f7e" letter-spacing="3">MARKET TERMINAL</text>
+<text x="68" y="322" font-family="DejaVu Sans Mono,monospace" font-size="76" font-weight="600" fill="#edf3ec" >Ticktop</text>
+<text x="74" y="382" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="25" font-weight="400" fill="#9fb7ab" >终端行情看板</text>
+<rect x="74" y="510" width="438" height="66" rx="8" fill="#0c1613" stroke="#385d49"/>
+<text x="96" y="551" font-family="DejaVu Sans Mono,monospace" font-size="25" font-weight="400" fill="#9fd7b1" >›</text>
+<text x="127" y="551" font-family="DejaVu Sans Mono,monospace" font-size="24" font-weight="400" fill="#e1eee6" >ticktop</text>
+<text x="74" y="666" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#718f7e" >Linux / macOS    ·    Rust    ·    MIT</text>
+<g filter="url(#shadow)">
+<rect x="650" y="100" width="878" height="440" rx="12" fill="#10191b" stroke="#354c43"/>
+<rect x="651" y="101" width="876" height="40" rx="11" fill="#192622"/>
+<rect x="651" y="126" width="876" height="15" rx="0" fill="#192622"/>
+<circle cx="676" cy="121" r="5" fill="#a77e75"/>
+<circle cx="695" cy="121" r="5" fill="#ae9e72"/>
+<circle cx="714" cy="121" r="5" fill="#78a88a"/>
+<text x="1090" y="126" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#9ab3a4" text-anchor="middle">ticktop --full</text>
+<text x="678" y="175" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="19" font-weight="600" fill="#d6e5dc" >自选行情</text>
+<text x="1499" y="174" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="13" font-weight="400" fill="#8fa89b" text-anchor="end">全部 / 重点关注 / 科技</text>
+<path d="M678 192H1500" stroke="#293e35"/>
+<text x="686" y="218" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="12" font-weight="400" fill="#7d9b8b" >代码</text>
+<text x="787" y="218" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="12" font-weight="400" fill="#7d9b8b" >名称</text>
+<text x="970" y="218" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="12" font-weight="400" fill="#7d9b8b" >报价</text>
+<rect x="678" y="233" width="326" height="38" rx="4" fill="#21392d"/>
+<text x="686" y="258" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#adc5b6" >sz300750</text>
+<text x="787" y="258" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="15" font-weight="500" fill="#d8e6dd" >宁德时代</text>
+<text x="983" y="258" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#81998b" text-anchor="end">--</text>
+<text x="686" y="298" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#adc5b6" >sh600519</text>
+<text x="787" y="298" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="15" font-weight="500" fill="#d8e6dd" >贵州茅台</text>
+<text x="983" y="298" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#81998b" text-anchor="end">--</text>
+<text x="686" y="338" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#adc5b6" >sh600036</text>
+<text x="787" y="338" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="15" font-weight="500" fill="#d8e6dd" >招商银行</text>
+<text x="983" y="338" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#81998b" text-anchor="end">--</text>
+<text x="686" y="378" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#adc5b6" >sz002594</text>
+<text x="787" y="378" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="15" font-weight="500" fill="#d8e6dd" >比亚迪</text>
+<text x="983" y="378" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#81998b" text-anchor="end">--</text>
+<text x="686" y="418" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#adc5b6" >sh688981</text>
+<text x="787" y="418" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="15" font-weight="500" fill="#d8e6dd" >中芯国际</text>
+<text x="983" y="418" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#81998b" text-anchor="end">--</text>
+<text x="686" y="458" font-family="DejaVu Sans Mono,monospace" font-size="13" font-weight="400" fill="#adc5b6" >sh601318</text>
+<text x="787" y="458" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="15" font-weight="500" fill="#d8e6dd" >中国平安</text>
+<text x="983" y="458" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#81998b" text-anchor="end">--</text>
+<path d="M1024 208V479" stroke="#263b33"/>
+<text x="1050" y="219" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="14" font-weight="400" fill="#adc4b5" >宁德时代 · 日内走势</text>
+<path d="M1050 253H1500" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1050 302H1500" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1050 351H1500" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1050 400H1500" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1050 449H1500" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1050 240V451" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1162 240V451" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1274 240V451" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1386 240V451" stroke="#22372e" stroke-dasharray="3 7"/>
+<path d="M1498 240V451" stroke="#22372e" stroke-dasharray="3 7"/>
+<polygon points="1050,418 1070,409 1090,422 1110,386 1130,393 1150,363 1170,369 1190,347 1210,366 1230,343 1250,355 1270,312 1290,321 1310,307 1330,331 1350,314 1370,287 1390,299 1410,264 1430,276 1450,251 1470,265 1498,244 1498,451 1050,451" fill="url(#chart)"/>
+<polyline points="1050,418 1070,409 1090,422 1110,386 1130,393 1150,363 1170,369 1190,347 1210,366 1230,343 1250,355 1270,312 1290,321 1310,307 1330,331 1350,314 1370,287 1390,299 1410,264 1430,276 1450,251 1470,265 1498,244" fill="none" stroke="#9ed5b2" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="1050" y="478" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#6e8c7c" >09:30</text>
+<text x="1498" y="478" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#6e8c7c" text-anchor="end">15:00</text>
+<text x="678" y="519" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#729681" >m 模式   h 云图   / 搜索   ? 帮助</text>
+</g>
+<g filter="url(#shadow)">
+<rect x="997" y="518" width="531" height="176" rx="10" fill="#10181b" stroke="#3d5149"/>
+<rect x="998" y="519" width="529" height="32" rx="9" fill="#202d29"/>
+<rect x="998" y="538" width="529" height="13" rx="0" fill="#202d29"/>
+<text x="1018" y="541" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#becfc4" >MINIMAL / 简约模式</text>
+<text x="1504" y="541" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#a2b6aa" text-anchor="end">m</text>
+<text x="1020" y="579" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#7f9589" >code</text>
+<text x="1220" y="579" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#7f9589" >value</text>
+<text x="1410" y="579" font-family="DejaVu Sans Mono,monospace" font-size="12" font-weight="400" fill="#7f9589" >delta%</text>
+<text x="1020" y="613" font-family="DejaVu Sans Mono,monospace" font-size="16" font-weight="400" fill="#c8d4ca" >sz300750</text>
+<text x="1220" y="613" font-family="DejaVu Sans Mono,monospace" font-size="16" font-weight="400" fill="#9caf9f" >--</text>
+<text x="1410" y="613" font-family="DejaVu Sans Mono,monospace" font-size="16" font-weight="400" fill="#9caf9f" >--</text>
+<text x="1020" y="647" font-family="DejaVu Sans Mono,monospace" font-size="16" font-weight="400" fill="#c8d4ca" >sh600519</text>
+<text x="1220" y="647" font-family="DejaVu Sans Mono,monospace" font-size="16" font-weight="400" fill="#9caf9f" >--</text>
+<text x="1410" y="647" font-family="DejaVu Sans Mono,monospace" font-size="16" font-weight="400" fill="#9caf9f" >--</text>
+</g>
+<path d="M74 714H1528" stroke="#26392f"/>
+<text x="74" y="752" font-family="DejaVu Sans Mono,monospace" font-size="14" font-weight="400" fill="#759783" >Nyakooo / ticktop</text>
+<text x="1528" y="752" font-family="Noto Sans CJK SC,Noto Sans CJK JP,sans-serif" font-size="13" font-weight="400" fill="#6f8e7c" text-anchor="end">界面示意 · 非实时行情</text>
+</svg>

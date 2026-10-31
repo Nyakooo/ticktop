@@ -318,8 +318,11 @@ fn pause_freezes_display_and_resume_applies_latest_quote() {
     assert_eq!(app.quotes[id].price, Price(1234500));
 }
 #[test]
-fn every_mode_renders_at_multiple_terminal_sizes_without_leaking_names() {
+fn every_mode_renders_at_multiple_terminal_sizes_with_minimal_stock_codes() {
     let (_dir, mut app) = app();
+    app.on_market(MarketEvent::Sectors(ticktop::sectors::demo(
+        ticktop::sectors::Category::Industry,
+    )));
     let quotes = market::demo_quotes(&app.user.watchlist);
     app.on_market(MarketEvent::Quotes(quotes));
     app.on_market(MarketEvent::Chart(market::demo_history(
@@ -335,7 +338,9 @@ fn every_mode_renders_at_multiple_terminal_sizes_without_leaking_names() {
                 if mode == Mode::Minimal && w >= 46 {
                     assert!(!rendered.contains("宁德时代"));
                     assert!(!rendered.contains("重点关注"));
-                    assert!(!rendered.contains("300750"));
+                    if !heatmap {
+                        assert!(rendered.contains("300750"));
+                    }
                 }
             }
         }
@@ -499,4 +504,317 @@ fn failed_add_to_group_save_is_retried_without_losing_the_stock() {
     assert!(app.flush_state());
     let saved = UserState::load(&state_path).unwrap();
     assert!(saved.groups[0].symbols.contains(&"sz000001".into()));
+}
+
+#[test]
+fn mode_switch_is_saved_immediately_without_waiting_for_exit() {
+    let (_dir, mut app) = app();
+    app.key(key(KeyCode::Char('m')));
+    let saved = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
+    assert_eq!(saved.mode, Mode::Minimal);
+    assert_eq!(
+        app.paths.load_config().unwrap().0.default_mode,
+        Mode::Minimal
+    );
+    app.key(key(KeyCode::Char('m')));
+    let saved = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
+    assert_eq!(saved.mode, Mode::Full);
+}
+
+#[test]
+fn saved_mode_survives_restart_when_config_is_missing() {
+    let (dir, mut app) = app();
+    app.user.mode = Mode::Minimal;
+    app.persist().unwrap();
+    let paths = Paths::resolve(Some(&dir.path().to_path_buf())).unwrap();
+    let (config, first) = paths.load_config().unwrap();
+    assert!(first);
+    let restarted = App::new(config, paths, first, true).unwrap();
+    assert_eq!(restarted.user.mode, Mode::Minimal);
+    assert!(restarted.modal.is_none());
+}
+
+#[test]
+fn new_state_uses_remembered_default_mode_without_welcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::resolve(Some(&dir.path().to_path_buf())).unwrap();
+    let config = Config {
+        default_mode: Mode::Minimal,
+        ..Config::default()
+    };
+    paths.save_config(&config).unwrap();
+    let app = App::new(config, paths, false, true).unwrap();
+    assert_eq!(app.user.mode, Mode::Minimal);
+}
+
+#[test]
+fn market_cloud_is_independent_of_watchlists_and_groups() {
+    let (_dir, mut app) = app();
+    let snapshot = ticktop::sectors::demo(ticktop::sectors::Category::Industry);
+    let count = snapshot.sectors.len();
+    app.on_market(MarketEvent::Sectors(snapshot));
+    app.user.watchlist.clear();
+    app.user.groups.clear();
+    app.user.selected = None;
+    app.key(key(KeyCode::Char('h')));
+    assert_eq!(app.sector_snapshot().unwrap().sectors.len(), count);
+    let full = screen(&app, 130, 36);
+    assert!(full.contains("大盘云图"));
+    assert!(full.contains("全部行业板块"));
+    assert!(!full.contains("自选分组涨跌"));
+    app.key(key(KeyCode::Char('m')));
+    let minimal = screen(&app, 130, 36);
+    assert!(minimal.contains("matrix"));
+    assert!(minimal.contains("农业"));
+    assert!(!minimal.contains("宁德时代"));
+}
+
+#[test]
+fn all_sectors_are_reachable_and_stock_selection_is_preserved() {
+    let (_dir, mut app) = app();
+    app.on_market(MarketEvent::Sectors(ticktop::sectors::demo(
+        ticktop::sectors::Category::Industry,
+    )));
+    let selected = app.user.selected.clone();
+    let group = app.user.group;
+    let period = app.user.period;
+    app.key(key(KeyCode::Char('h')));
+    app.set_viewport(80, 24);
+    app.key(key(KeyCode::PageDown));
+    assert_eq!(app.sector_index, app.cloud_page_size);
+    app.key(key(KeyCode::End));
+    assert_eq!(
+        app.sector_index + 1,
+        app.sector_snapshot().unwrap().sectors.len()
+    );
+    assert_eq!(app.user.selected, selected);
+    assert_eq!(app.user.group, group);
+    assert_eq!(app.user.period, period);
+    app.key(key(KeyCode::Char('d')));
+    assert!(app.modal.is_none());
+    app.key(key(KeyCode::Tab));
+    assert_eq!(
+        app.user.sector_category,
+        ticktop::sectors::Category::Concept
+    );
+    assert_eq!(app.sector_index, 0);
+    assert!(app.request_dirty);
+    assert_eq!(app.user.selected, selected);
+}
+
+#[test]
+fn cloud_cache_and_pause_keep_actual_market_snapshots() {
+    let (dir, mut app) = app();
+    let initial = ticktop::sectors::demo(ticktop::sectors::Category::Industry);
+    app.on_market(MarketEvent::Sectors(initial.clone()));
+    app.key(key(KeyCode::Char(' ')));
+    let mut latest = initial;
+    latest.sectors[0].change_pct = Some(9.87);
+    app.on_market(MarketEvent::Sectors(latest));
+    assert_ne!(
+        app.sector_snapshot().unwrap().sectors[0].change_pct,
+        Some(9.87)
+    );
+    app.key(key(KeyCode::Char(' ')));
+    assert_eq!(
+        app.sector_snapshot().unwrap().sectors[0].change_pct,
+        Some(9.87)
+    );
+    let paths = Paths::resolve(Some(&dir.path().to_path_buf())).unwrap();
+    let restarted = App::new(Config::default(), paths, false, true).unwrap();
+    assert_eq!(
+        restarted.sector_snapshot().unwrap().sectors[0].change_pct,
+        Some(9.87)
+    );
+}
+
+#[test]
+fn sector_failure_never_substitutes_watchlist_data() {
+    let (_dir, mut app) = app();
+    app.user.heatmap = true;
+    app.on_market(MarketEvent::Error {
+        kind: market::Kind::Sectors,
+        message: "failed".into(),
+        retry_secs: 30,
+    });
+    assert!(app.sector_snapshot().is_none());
+    assert!(screen(&app, 100, 30).contains("暂无全市场板块数据"));
+}
+
+#[test]
+fn cloud_paging_returns_from_partial_last_page_in_both_modes() {
+    for mode in [Mode::Full, Mode::Minimal] {
+        let (_dir, mut app) = app();
+        let mut snapshot = ticktop::sectors::demo(ticktop::sectors::Category::Industry);
+        snapshot.sectors = (0..101)
+            .map(|i| {
+                let mut sector = snapshot.sectors[0].clone();
+                sector.code = format!("test{i:03}");
+                sector
+            })
+            .collect();
+        app.on_market(MarketEvent::Sectors(snapshot));
+        app.user.heatmap = true;
+        app.user.mode = mode;
+        app.set_viewport(80, 24);
+        let page_size = app.cloud_page_size;
+        app.key(key(KeyCode::Char('n')));
+        assert_eq!(app.sector_index, page_size);
+        app.key(key(KeyCode::Char('p')));
+        assert_eq!(app.sector_index, 0);
+        app.key(key(KeyCode::PageUp));
+        assert!(!app.message.is_empty());
+        app.key(key(KeyCode::End));
+        let last_page = app.sector_index / page_size;
+        app.key(key(KeyCode::PageDown));
+        assert_eq!(app.sector_index, 100);
+        app.key(key(KeyCode::PageUp));
+        assert_eq!(app.sector_index / page_size, last_page - 1);
+        app.key(key(KeyCode::Home));
+        app.sector_index = page_size - 1;
+        app.key(key(KeyCode::End));
+        // Page navigation lands at page starts, even on a short final page.
+        app.key(key(KeyCode::PageUp));
+        assert_eq!(app.sector_index, (last_page - 1) * page_size);
+    }
+}
+
+#[test]
+fn mouse_controls_cloud_pages_categories_and_numeric_mode() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (_dir, mut app) = app();
+    app.on_market(MarketEvent::Sectors(ticktop::sectors::demo(
+        ticktop::sectors::Category::Industry,
+    )));
+    app.user.heatmap = true;
+    let click = |x, y| MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::NONE,
+    };
+    ui::mouse(&mut app, click(10, 5), 80, 24);
+    assert_eq!(app.sector_index, app.cloud_page_size);
+    ui::mouse(&mut app, click(2, 5), 80, 24);
+    assert_eq!(app.sector_index, 0);
+    ui::mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        },
+        80,
+        24,
+    );
+    assert_eq!(app.sector_index, app.cloud_page_size);
+    ui::mouse(&mut app, click(2, 22), 80, 24);
+    assert_eq!(app.user.mode, Mode::Minimal);
+    assert!(screen(&app, 80, 24).contains("matrix"));
+    app.sector_index = 0;
+    ui::mouse(&mut app, click(45, 7), 80, 24);
+    assert_eq!(app.sector_index, 1);
+    ui::mouse(&mut app, click(15, 3), 80, 24);
+    assert_eq!(
+        app.user.sector_category,
+        ticktop::sectors::Category::Concept
+    );
+    ui::mouse(&mut app, click(25, 3), 80, 24);
+    assert_eq!(app.user.sector_sort, ticktop::sectors::Sort::Losers);
+    app.modal = Some(Modal::Help { offset: 0 });
+    ui::mouse(&mut app, click(2, 22), 80, 24);
+    assert_eq!(app.user.mode, Mode::Minimal);
+}
+
+#[test]
+fn cloud_sort_orders_missing_values_last_and_persists_across_restart() {
+    use ticktop::sectors::{Category, Sort};
+    let (dir, mut app) = app();
+    let mut snapshot = ticktop::sectors::demo(Category::Industry);
+    snapshot.sectors.truncate(4);
+    for (sector, (change, count)) in snapshot.sectors.iter_mut().zip([
+        (Some(1.), 10),
+        (Some(-2.), 40),
+        (None, 30),
+        (Some(1.), 20),
+    ]) {
+        sector.change_pct = change;
+        sector.stock_count = count;
+    }
+    let code = snapshot.sectors[3].code.clone();
+    app.on_market(MarketEvent::Sectors(snapshot.clone()));
+    app.user.heatmap = true;
+    assert_eq!(
+        app.sector_snapshot().unwrap().sectors[0].code,
+        snapshot.sectors[0].code
+    );
+    assert!(
+        app.sector_snapshot()
+            .unwrap()
+            .sectors
+            .last()
+            .unwrap()
+            .change_pct
+            .is_none()
+    );
+    app.sector_index = 1;
+    snapshot.sectors[1].change_pct = Some(5.);
+    app.on_market(MarketEvent::Sectors(snapshot.clone()));
+    assert_eq!(
+        app.sector_snapshot().unwrap().sectors[app.sector_index].code,
+        code
+    );
+    app.key(key(KeyCode::Char('s')));
+    assert_eq!(app.user.sector_sort, Sort::Losers);
+    assert_eq!(
+        app.sector_snapshot().unwrap().sectors[0].change_pct,
+        Some(1.)
+    );
+    assert!(
+        app.sector_snapshot()
+            .unwrap()
+            .sectors
+            .last()
+            .unwrap()
+            .change_pct
+            .is_none()
+    );
+    app.key(key(KeyCode::Char('s')));
+    assert_eq!(app.user.sector_sort, Sort::Size);
+    assert_eq!(app.sector_snapshot().unwrap().sectors[0].stock_count, 40);
+    app.persist().unwrap();
+    let paths = Paths::resolve(Some(&dir.path().to_path_buf())).unwrap();
+    let restarted = App::new(Config::default(), paths, false, true).unwrap();
+    assert_eq!(restarted.user.sector_sort, Sort::Size);
+    assert_eq!(
+        restarted.sector_snapshot().unwrap().sectors[0].stock_count,
+        40
+    );
+}
+
+#[test]
+fn hovering_the_treemap_updates_details_without_repeated_redraws() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let (_dir, mut app) = app();
+    app.on_market(MarketEvent::Sectors(ticktop::sectors::demo(
+        ticktop::sectors::Category::Industry,
+    )));
+    app.user.heatmap = true;
+    app.user.mode = Mode::Full;
+    let event = MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 70,
+        row: 17,
+        modifiers: KeyModifiers::NONE,
+    };
+    app.dirty = false;
+    ui::mouse(&mut app, event, 80, 24);
+    assert_ne!(app.sector_index, 0);
+    assert!(app.dirty);
+    let sector = &app.sector_snapshot().unwrap().sectors[app.sector_index];
+    assert!(screen(&app, 80, 24).contains(&sector.name));
+    app.dirty = false;
+    ui::mouse(&mut app, event, 80, 24);
+    assert!(!app.dirty);
 }

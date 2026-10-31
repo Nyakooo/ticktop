@@ -58,6 +58,8 @@ pub struct UserState {
     pub selected: Option<String>,
     pub period: Period,
     pub heatmap: bool,
+    pub sector_category: crate::sectors::Category,
+    pub sector_sort: crate::sectors::Sort,
 }
 impl Default for UserState {
     fn default() -> Self {
@@ -93,6 +95,8 @@ impl Default for UserState {
             group: 0,
             period: Period::Intraday,
             heatmap: false,
+            sector_category: crate::sectors::Category::default(),
+            sector_sort: crate::sectors::Sort::default(),
         }
     }
 }

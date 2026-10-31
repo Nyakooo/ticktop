@@ -34,7 +34,7 @@ case "$(uname -m)" in
     *) fail 'Supported architectures: x86_64, aarch64/arm64' ;;
 esac
 asset="ticktop-${arch}-${platform}.tar.gz"
-base='https://github.com/Nyakooo/terminal-stock-dashboard/releases'
+base='https://github.com/Nyakooo/ticktop/releases'
 if [ "$version" = latest ]; then download="$base/latest/download"; else download="$base/download/$version"; fi
 install_dir="${TICKTOP_INSTALL_DIR:-$HOME/.local/bin}"
 case "$install_dir" in /*) ;; *) fail 'TICKTOP_INSTALL_DIR must be absolute' ;; esac

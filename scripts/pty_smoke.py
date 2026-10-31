@@ -53,6 +53,16 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         send("\r")
         send("m")
         send("h")
+        send("\t")  # whole-market concept classification
+        send("\x1b[F")  # last sector
+        send("\x1b[5~")  # previous cloud page
+        send("n")
+        send("p")
+        send("\x1b[<0;2;35M")  # SGR mouse: footer mode -> full
+        send("\x1b[<0;2;35m")
+        send("\x1b[<0;2;35M")  # footer mode -> minimal
+        send("\x1b[<0;2;35m")
+        send("\x1b[<65;10;10M")  # mouse wheel next page
         send(" ")
         send(" ")
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
@@ -74,7 +84,10 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         state = json.loads(Path(data, "demo-state.json").read_text())
         assert state["mode"] == "minimal"
         assert state["heatmap"] is True
+        assert state["sector_category"] == "concept"
         assert any(g["name"] == "摸鱼观察" for g in state["groups"])
+        assert b"\x1b[?1006h" in output, "mouse capture not enabled"
+        assert b"\x1b[?1006l" in output, "mouse capture not disabled"
         assert b"\x1b[?1049l" in output, "alternate screen not restored"
         print("PTY smoke passed: Chinese search, group creation, modes, heatmap, pause, resize, help, exit")
     finally:

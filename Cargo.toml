@@ -3,9 +3,9 @@ name = "ticktop"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "A quiet, keyboard-first A-share market terminal"
+description = "A lightweight terminal market dashboard with watchlists, charts, and heatmaps."
 license = "MIT"
-repository = "https://github.com/Nyakooo/terminal-stock-dashboard"
+repository = "https://github.com/Nyakooo/ticktop"
 
 [dependencies]
 anyhow = "1"

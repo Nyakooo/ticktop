@@ -51,6 +51,14 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         send("n")
         send("摸鱼观察")
         send("\r")
+        send("i")
+        send("\x15")  # Ctrl+u clears the current setting
+        send("上证指数,深证成指,恒生指数,科创50,沪深300")
+        send("\r")
+        assert '"hkHSI"' in Path(data, "config.toml").read_text(), "index configuration was not saved"
+        send("/")
+        send("510300")
+        send("\r")
         send("m")
         send("h")
         send("\t")  # whole-market concept classification
@@ -89,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         assert b"\x1b[?1006h" in output, "mouse capture not enabled"
         assert b"\x1b[?1006l" in output, "mouse capture not disabled"
         assert b"\x1b[?1049l" in output, "alternate screen not restored"
-        print("PTY smoke passed: Chinese search, group creation, modes, heatmap, pause, resize, help, exit")
+        print("PTY smoke passed: Chinese/ETF search, resident indices, groups, modes, heatmap, pause, resize, help, exit")
     finally:
         try:
             os.kill(pid, signal.SIGKILL)

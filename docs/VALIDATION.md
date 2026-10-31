@@ -116,3 +116,13 @@ Release review: Standards axis found one terminal-lifecycle cleanup issue; fixed
 - 新增日 K 线字段解析、换手衰减/归一化、平价/零换手、无效数据、双模式多尺寸渲染、暂停恢复及缓存重启测试。
 - 实际 TUI 渲染预览由 `examples/screens.rs` 生成，演示数据明确标识。
 - 东方财富日线接口最初经 Python 成功返回 240 条日线；后续 Python 与 Rust 请求均被远端断连。opt-in `live_chips_daily_source` 未通过，不能据此宣称实时数据接入稳定。失败展示不可用或保留已有缓存，不以演示数据替代。
+
+
+## ETF / 指数及常驻栏增量验证（2026-10-31）
+
+- 内置新浪公开 ETF 名单快照 1,715 项，原始分页条数与 count 接口一致，按完整交易所代码去重。指数注册表包含 9 个常用指数。
+- `cargo test --locked`：62 项通过，4 项需手动开启的测试忽略。覆盖代码重名、中文/拼音/代码搜索、ETF 三位小数、恒生时间格式、设置迁移/保存/关闭、窄窗口折叠、云图分页几何及鼠标定位。
+- `cargo test --locked live_indices_and_etf_quotes_and_history -- --ignored --nocapture`：真实网络验证通过，7 个标的报价完整；恒生、沪深300ETF、上证指数的分时和日线均返回数据。
+- `cargo clippy --locked --all-targets -- -D warnings`、`cargo fmt`、优化版构建通过。
+- `python3 scripts/pty_smoke.py target/release/ticktop`：真实 PTY 验证中文/ETF 搜索、常驻指数设置保存、分组、完整/简约、云图、暂停、鼠标、缩放、帮助与终端恢复通过。
+- `examples/screens --indices` 生成完整及简约模式的实际渲染预览；预览明确使用演示数据。

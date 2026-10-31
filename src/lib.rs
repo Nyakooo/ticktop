@@ -1,6 +1,7 @@
 pub mod app;
 pub mod chips;
 pub mod config;
+pub mod instruments;
 pub mod market;
 pub mod model;
 pub mod search;

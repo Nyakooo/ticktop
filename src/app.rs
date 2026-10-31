@@ -88,7 +88,8 @@ impl App {
             .read::<Catalog>("catalog")?
             .unwrap_or_else(crate::storage::bundled_catalog);
         let catalog_as_of = catalog.as_of;
-        let catalog = catalog.stocks;
+        let mut catalog = catalog.stocks;
+        crate::instruments::merge(&mut catalog);
         let search = SearchIndex::new(&catalog);
         let state_path = paths.data.join(if demo {
             "demo-state.json"
@@ -162,12 +163,28 @@ impl App {
         app.load_chart();
         Ok(app)
     }
+    pub fn preview_index(&mut self, id: &str) {
+        if !self.config.pinned_indices.iter().any(|p| p == id) {
+            return;
+        }
+        self.user.selected = Some(id.into());
+        self.user.heatmap = false;
+        self.load_chart();
+        self.request_dirty = true;
+        self.dirty = true;
+        self.save_state_change();
+    }
     pub fn request(&self) -> Request {
         let mut symbols = self.user.watchlist.clone();
         if let Some(id) = &self.user.selected
             && !symbols.contains(id)
         {
             symbols.push(id.clone());
+        }
+        for id in &self.config.pinned_indices {
+            if !symbols.contains(id) {
+                symbols.push(id.clone());
+            }
         }
         Request {
             config: self.config.clone(),
@@ -231,11 +248,9 @@ impl App {
         (columns, columns * rows)
     }
     pub fn set_viewport(&mut self, width: u16, height: u16) {
-        (self.cloud_columns, self.cloud_page_size) = Self::cloud_dimensions(
-            width.saturating_sub(2),
-            height.saturating_sub(9),
-            self.user.mode,
-        );
+        let area = crate::ui::content_area(self, width, height);
+        (self.cloud_columns, self.cloud_page_size) =
+            Self::cloud_dimensions(area.width, area.height, self.user.mode);
     }
     fn apply_sectors(&mut self, mut snapshot: crate::sectors::Snapshot) {
         self.user.sector_sort.apply(&mut snapshot.sectors);
@@ -472,6 +487,7 @@ impl App {
                 }
                 self.catalog_as_of = catalog.as_of;
                 self.catalog = catalog.stocks;
+                crate::instruments::merge(&mut self.catalog);
                 self.search = SearchIndex::new(&self.catalog);
                 self.catalog_error = None;
             }
@@ -590,6 +606,13 @@ impl App {
                 })
             }
             KeyCode::Char('?') => self.modal = Some(Modal::Help { offset: 0 }),
+            KeyCode::Char('i') => {
+                self.modal = Some(Modal::Settings {
+                    draft: self.config.clone(),
+                    field: 6,
+                    input: field_value(&self.config, 6),
+                });
+            }
             KeyCode::Char(',') => {
                 self.modal = Some(Modal::Settings {
                     draft: self.config.clone(),
@@ -920,11 +943,11 @@ impl App {
                             + if key.code == KeyCode::BackTab
                                 || key.modifiers.contains(KeyModifiers::SHIFT)
                             {
-                                5
+                                6
                             } else {
                                 1
                             })
-                            % 6;
+                            % 7;
                         input = field_value(&draft, field);
                         Some(Modal::Settings {
                             draft,
@@ -969,7 +992,8 @@ pub fn field_value(c: &Config, field: usize) -> String {
         .into(),
         3 => c.network.proxy_url.clone(),
         4 => c.network.timeout_secs.to_string(),
-        _ => c.refresh.sectors_secs.to_string(),
+        5 => c.refresh.sectors_secs.to_string(),
+        _ => c.pinned_indices.join(","),
     }
 }
 fn apply_field(c: &mut Config, field: usize, input: &str) -> Result<()> {
@@ -995,6 +1019,7 @@ fn apply_field(c: &mut Config, field: usize, input: &str) -> Result<()> {
             c.refresh.sectors_secs =
                 crate::config::parse_interval(input).map_err(anyhow::Error::msg)?
         }
+        6 => c.pinned_indices = crate::instruments::parse_pinned(input)?,
         _ => {
             let n = input
                 .parse::<u64>()

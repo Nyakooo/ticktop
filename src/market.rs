@@ -203,7 +203,7 @@ pub fn parse_quotes(text: &str) -> Result<Vec<Quote>> {
             open: Price::parse(fields[5])?,
             high: Price::parse(fields[33])?,
             low: Price::parse(fields[34])?,
-            source_time: parse_cn_time(fields[30])?,
+            source_time: parse_cn_time(&fields[30].replace(['/', ':', ' '], ""))?,
             received_at: Utc::now(),
         });
     }
@@ -330,17 +330,25 @@ pub async fn catalog(http: &reqwest::Client) -> Result<Catalog> {
             name: name.into(),
         });
     }
+    if stocks.len() < 4000 {
+        bail!("incomplete A-share catalog");
+    }
+    let etf_source = match crate::instruments::fetch_etfs(http).await {
+        Ok(etfs) => {
+            stocks.extend(etfs);
+            "Sina ETF live catalog"
+        }
+        Err(_) => "bundled ETF catalog (2026-10-31)",
+    };
+    crate::instruments::merge(&mut stocks);
     stocks.sort_by(|a, b| a.id.cmp(&b.id));
     stocks.dedup_by(|a, b| a.id == b.id);
-    if stocks.len() < 4000 {
-        bail!("incomplete catalog");
-    }
     Ok(Catalog {
         as_of: Utc::now()
             .with_timezone(&FixedOffset::east_opt(28800).unwrap())
             .format("%Y-%m-%d")
             .to_string(),
-        source: CATALOG_URL.into(),
+        source: format!("{CATALOG_URL}; {etf_source}; supported index registry"),
         stocks,
     })
 }
@@ -454,7 +462,10 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                 }
             })
         };
-        if (kind == Kind::Chips && (job.focus.is_none() || job.heatmap_enabled))
+        if (kind == Kind::Chips
+            && (job.focus.as_ref().is_none_or(|id| {
+                crate::instruments::is_index(id) || crate::instruments::is_etf(id)
+            }) || job.heatmap_enabled))
             || (kind == Kind::Chart && job.focus.is_none())
             || (kind == Kind::Catalog && job.demo)
             || (kind == Kind::Sectors && !job.heatmap_enabled)
@@ -522,6 +533,13 @@ pub fn demo_quotes(ids: &[String]) -> Vec<Quote> {
     ids.iter()
         .map(|id| {
             let base = match id.as_str() {
+                "sh000001" => 3599_0200,
+                "sz399001" => 108337800,
+                "hkHSI" => 232944200,
+                "sh000688" => 1160_8400,
+                "sh000300" => 3985_5000,
+                id if crate::instruments::is_index(id) => 2500_0000,
+                id if crate::instruments::is_etf(id) => 4_0650,
                 "sz300750" => 268_5000,
                 "sh600519" => 1528_0000,
                 "sh688981" => 96_3500,

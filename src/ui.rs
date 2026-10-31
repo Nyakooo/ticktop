@@ -96,7 +96,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         );
         return;
     }
-    let outer = outer_layout(area);
+    let outer = outer_layout(area, app);
     header(frame, app, outer[0], p);
     if app.user.heatmap {
         cloud_tabs(frame, app, outer[1], p);
@@ -166,14 +166,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     );
     let keys = if app.user.heatmap {
         if app.user.mode == Mode::Minimal {
-            "m mode  h table     Tab type  n/p page  s sort  mouse  , cfg  ?  q"
+            "m mode  h table     Tab type  n/p page  s sort  mouse  i index  i index  , cfg  ?  q"
         } else {
-            "m 简约  h 自选行情   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  , 设置  ? 帮助  q 退出"
+            "m 简约  h 自选行情   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  i 常驻  , 设置  ? 帮助  q 退出"
         }
     } else if app.user.mode == Mode::Minimal {
         "m mode  h view  [] group  / find  a add  g groups  , cfg  ?  q"
     } else {
-        "m 简约  h 大盘云图  [] 分组  ↑↓ 选股  ←→ 周期  / 搜索  a 添加  g 分组  , 设置  ? 帮助  q 退出"
+        "m 简约  h 大盘云图  [] 分组  ↑↓ 选股  ←→ 周期  / 搜索  a 添加  g 分组  i 常驻  , 设置  ? 帮助  q 退出"
     };
     frame.render_widget(
         Paragraph::new(keys).style(Style::default().fg(p.dim)),
@@ -189,9 +189,9 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         text(if quiet { "metrics --watch" } else { "ticktop_" }, p.accent),
         text(
             if quiet {
-                "    A / local"
+                "    market / local"
             } else {
-                "   A股 · 只看盘"
+                "   行情 · 只看盘"
             },
             p.dim,
         ),
@@ -214,6 +214,93 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         text(if app.paused { "   ||" } else { "" }, p.dim),
     ];
     f.render_widget(Paragraph::new(Line::from(spans)), r);
+    index_bar(f, app, r, p);
+}
+fn index_columns(app: &App, width: u16) -> usize {
+    (width
+        / if app.user.mode == Mode::Minimal {
+            31
+        } else {
+            42
+        })
+    .max(1) as usize
+}
+fn index_rows(app: &App, width: u16) -> u16 {
+    app.config
+        .pinned_indices
+        .len()
+        .div_ceil(index_columns(app, width)) as u16
+}
+fn index_cells(app: &App, r: Rect) -> Vec<Rect> {
+    let columns = index_columns(app, r.width);
+    let width = r.width / columns as u16;
+    app.config
+        .pinned_indices
+        .iter()
+        .enumerate()
+        .take(r.height.saturating_sub(1) as usize * columns)
+        .map(|(i, _)| {
+            Rect::new(
+                r.x + (i % columns) as u16 * width,
+                r.y + 1 + (i / columns) as u16,
+                width,
+                1,
+            )
+        })
+        .collect()
+}
+fn index_bar(f: &mut Frame, app: &App, r: Rect, p: Palette) {
+    let cells = index_cells(app, r);
+    for (i, (id, cell)) in app
+        .config
+        .pinned_indices
+        .iter()
+        .zip(cells.iter().copied())
+        .enumerate()
+    {
+        if cells.len() < app.config.pinned_indices.len() && i + 1 == cells.len() {
+            f.render_widget(
+                Paragraph::new(format!(
+                    "+{} 项 · 放大窗口 / i 设置",
+                    app.config.pinned_indices.len() - i
+                ))
+                .style(Style::default().fg(p.dim)),
+                cell,
+            );
+            continue;
+        }
+        let name = if app.user.mode == Mode::Minimal {
+            id.as_str()
+        } else {
+            crate::instruments::INDICES
+                .iter()
+                .find(|(code, _)| code == id)
+                .map_or(id.as_str(), |(_, name)| *name)
+        };
+        let mut spans = vec![text(format!("{name} "), p.dim)];
+        if let Some(q) = app.quotes.get(id) {
+            spans.push(text(
+                format!(
+                    "{} {:+.2}%",
+                    crate::instruments::price(id, q.price),
+                    q.percent()
+                ),
+                p.change(q.percent()),
+            ));
+            if app.user.mode == Mode::Full {
+                spans.push(text(
+                    format!(" {}", q.source_time.format("%m-%d %H:%M")),
+                    p.dim,
+                ));
+            }
+            if q.age_secs() > 120 {
+                spans.push(text("*", p.dim));
+            }
+        } else {
+            spans.push(text("-- --", p.dim));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), cell);
+    }
 }
 fn groups(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let quiet = app.user.mode == Mode::Minimal;
@@ -282,7 +369,7 @@ fn full(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 .unwrap_or_else(|| id.clone());
             let q = app.quotes.get(id);
             let price = q
-                .map(|q| q.price.to_string())
+                .map(|q| crate::instruments::price(&q.id, q.price))
                 .unwrap_or_else(|| "--".into());
             let pct = q
                 .map(|q| format!("{:+.2}%", q.percent()))
@@ -340,17 +427,24 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     f.render_widget(
         Paragraph::new(Line::from(vec![
             text(stock.map(|s| s.name.as_str()).unwrap_or(id), p.fg),
-            text(format!("  {}", id.get(2..).unwrap_or(id)), p.dim),
+            text(
+                format!(
+                    "  {} · {}",
+                    id.get(2..).unwrap_or(id),
+                    crate::instruments::kind(id)
+                ),
+                p.dim,
+            ),
         ])),
         rows[0],
     );
     let mut quote = vec![
         text(
-            q.map(|q| q.price.to_string())
+            q.map(|q| crate::instruments::price(&q.id, q.price))
                 .unwrap_or_else(|| "--".into()),
             p.fg,
         ),
-        text(" CNY   ", p.dim),
+        text(format!(" {}   ", crate::instruments::unit(id)), p.dim),
     ];
     if let Some(q) = q {
         quote.push(text(
@@ -358,7 +452,7 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 "{:+.2}%  {}{}",
                 q.percent(),
                 if q.change().0 >= 0 { "+" } else { "" },
-                q.change()
+                crate::instruments::price(id, q.change())
             ),
             p.change(q.percent()),
         ));
@@ -387,7 +481,9 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         })
         .collect::<Vec<_>>();
     f.render_widget(Paragraph::new(Line::from(tabs)), rows[2]);
-    if rows[3].width >= 66 {
+    if crate::instruments::is_index(id) || crate::instruments::is_etf(id) {
+        price_chart(f, app, rows[3], p);
+    } else if rows[3].width >= 66 {
         let panes = Layout::horizontal([Constraint::Min(30), Constraint::Length(31)])
             .spacing(2)
             .split(rows[3]);
@@ -401,7 +497,12 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let readout = if let Some(s) = app.series() {
         if let Some(i) = app.chart_cursor {
             let pt = &s.points[i.min(s.points.len().saturating_sub(1))];
-            format!("{}   {} CNY   j/k 游标", pt.label, pt.price)
+            format!(
+                "{}   {} {}   j/k 游标",
+                pt.label,
+                crate::instruments::price(&s.id, pt.price),
+                crate::instruments::unit(&s.id)
+            )
         } else {
             format!(
                 "{} · {} · {}点 · j/k 查看",
@@ -505,11 +606,17 @@ fn chip_panel(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     )));
     f.render_widget(Paragraph::new(lines), r);
 }
-// Use cent-based, evenly spaced ticks: Ratatui positions axis labels uniformly.
+// Use instrument tick units and evenly spaced ticks: Ratatui positions axis labels uniformly.
 // Rounding arbitrary floats only at display time can produce misleading/repeated labels.
-fn price_scale(min: crate::model::Price, max: crate::model::Price, height: u16) -> Vec<i64> {
-    let low = min.0.div_euclid(100);
-    let high = (max.0 + 99).div_euclid(100);
+fn price_scale(
+    min: crate::model::Price,
+    max: crate::model::Price,
+    height: u16,
+    decimals: usize,
+) -> Vec<i64> {
+    let units = if decimals == 3 { 10 } else { 100 };
+    let low = min.0.div_euclid(units);
+    let high = (max.0 + units - 1).div_euclid(units);
     let padding = ((high - low) * 12 / 100).max(high / 1000).max(1);
     let low = (low - padding).max(0);
     let high = high + padding;
@@ -553,21 +660,27 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .collect();
     let min = s.points.iter().map(|p| p.price).min().unwrap();
     let max = s.points.iter().map(|p| p.price).max().unwrap();
-    let ticks = price_scale(min, max, r.height.saturating_sub(1));
-    let bounds = [ticks[0] as f64 / 100., ticks[ticks.len() - 1] as f64 / 100.];
+    let decimals = crate::instruments::decimals(&s.id);
+    let scale = if decimals == 3 { 1000. } else { 100. };
+    let ticks = price_scale(min, max, r.height.saturating_sub(1), decimals);
+    let bounds = [
+        ticks[0] as f64 / scale,
+        ticks[ticks.len() - 1] as f64 / scale,
+    ];
     let selected = app
         .chart_cursor
         .unwrap_or(points.len() - 1)
         .min(points.len() - 1);
     let selected_point = &s.points[selected];
     let caption = format!(
-        "{} {} CNY  {}",
+        "{} {} {}  {}",
         if app.chart_cursor.is_some() {
             "查看"
         } else {
             "末价"
         },
-        selected_point.price,
+        crate::instruments::price(&s.id, selected_point.price),
+        crate::instruments::unit(&s.id),
         selected_point.label
     );
     let areas = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).split(r);
@@ -633,7 +746,7 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .into_iter()
         .map(|cents| {
             Span::styled(
-                format!("{}.{:02}", cents / 100, cents % 100),
+                format!("{:.*}", decimals, cents as f64 / scale),
                 Style::default().fg(p.dim),
             )
         })
@@ -663,7 +776,7 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             let q = app.quotes.get(id);
             Row::new([
                 id.clone(),
-                q.map(|q| q.price.to_string())
+                q.map(|q| crate::instruments::price(&q.id, q.price))
                     .unwrap_or_else(|| "--".into()),
                 q.map(|q| format!("{:+.2}", q.percent()))
                     .unwrap_or_else(|| "--".into()),
@@ -702,7 +815,7 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 } else {
                     i * (n - 1) / (count - 1)
                 };
-                samples.push(s.points[idx].price.to_string());
+                samples.push(crate::instruments::price(&s.id, s.points[idx].price));
             }
         }
     }
@@ -721,11 +834,17 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             }
         ));
     } else {
-        samples.push(if app.chip_error.is_some() {
-            "\n筹码估算 暂不可用".into()
-        } else {
-            "\n筹码估算 加载中…".into()
-        });
+        samples.push(
+            if app.user.selected.as_ref().is_some_and(|id| {
+                crate::instruments::is_index(id) || crate::instruments::is_etf(id)
+            }) {
+                "\nchip n/a".into()
+            } else if app.chip_error.is_some() {
+                "\n筹码估算 暂不可用".into()
+            } else {
+                "\n筹码估算 加载中…".into()
+            },
+        );
     }
     f.render_widget(
         Paragraph::new(samples.join("   "))
@@ -915,7 +1034,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         match modal {
             Modal::Help { .. } => 32,
             Modal::Search { .. } => 24,
-            Modal::Settings { .. } => 20,
+            Modal::Settings { .. } => 24,
             _ => 16,
         },
     );
@@ -934,7 +1053,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         Modal::GroupName { id: Some(_), .. } => "重命名分组",
         Modal::GroupName { .. } => "新建分组",
         Modal::Confirm(_) => "确认",
-        Modal::Settings { .. } => "网络与刷新设置",
+        Modal::Settings { .. } => "行情与网络设置",
     };
     let b = block(format!(" {title} · Esc 返回 "), p);
     let inner = b.inner(r);
@@ -976,7 +1095,8 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "↑↓ 选择股票   ←→ 日内/1周/1月   j/k 走势游标",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
                 "g 分组管理（n 新建 / r 重命名 / d 删除）",
-                ", 设置  Space 暂停显示  Esc 返回  q 退出",
+                ", 设置  i 常驻指数  Space 暂停显示  Esc 返回  q 退出",
+                "指数单位为点，ETF 保留三位小数；常驻栏 * 表示源报价超过120秒。",
                 "搜索输入中文/代码/拼音/首字母；Ctrl+a 加入分组",
                 "简约：code=股票代码；value=价格；delta%=较昨收",
                 "age(s)=源报价年龄；E01 报价 / E02 走势 / E03 板块失败",
@@ -1057,11 +1177,12 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 .iter()
                 .map(|s| {
                     ListItem::new(format!(
-                        "{}  {}  {}  {}",
+                        "{}  {}  {}  {} / {}",
                         app.user.alias(&s.id),
                         s.code(),
                         s.name,
-                        s.exchange()
+                        s.exchange(),
+                        crate::instruments::kind(&s.id)
                     ))
                 })
                 .collect::<Vec<_>>();
@@ -1186,6 +1307,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "代理地址",
                 "请求超时(s)",
                 "板块间隔(s)",
+                "常驻指数",
             ];
             let mut lines = vec![
                 Line::from(text(
@@ -1213,6 +1335,9 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
             }
             lines.extend([
                 Line::raw(""),
+                Line::raw("常驻：中文名称/代码，逗号分隔；清空或输入 无 关闭。最多6项。"),
+                Line::raw("上证指数,深证成指,恒生指数,科创50,沪深300,创业板指"),
+                Line::raw("另支持：上证50、中证500、中证1000。i 直接设置常驻。"),
                 Line::raw("代理策略 ←→ 切换：system / custom / direct"),
                 Line::raw("间隔 2–3600 秒，超时 1–120 秒；Ctrl+u 清空当前字段。"),
                 Line::raw("支持 http(s) / socks5 / socks5h，不自动绕过代理。"),
@@ -1261,11 +1386,16 @@ pub fn redact_proxy(raw: &str) -> String {
     }
 }
 
-fn outer_layout(area: Rect) -> std::rc::Rc<[Rect]> {
+fn outer_layout(area: Rect, app: &App) -> std::rc::Rc<[Rect]> {
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(
+                index_rows(app, area.width.saturating_sub(2))
+                    .saturating_add(1)
+                    .max(2)
+                    .min(area.height.saturating_sub(13).max(2)),
+            ),
             Constraint::Length(2),
             Constraint::Min(6),
             Constraint::Length(2),
@@ -1273,6 +1403,10 @@ fn outer_layout(area: Rect) -> std::rc::Rc<[Rect]> {
         ])
         .margin(1)
         .split(area)
+}
+
+pub fn content_area(app: &App, width: u16, height: u16) -> Rect {
+    outer_layout(Rect::new(0, 0, width, height), app)[2]
 }
 
 /// Hit testing uses the same tile allocations as the renderer.
@@ -1283,7 +1417,7 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
         return;
     }
     app.set_viewport(width, height);
-    let outer = outer_layout(Rect::new(0, 0, width, height));
+    let outer = outer_layout(Rect::new(0, 0, width, height), app);
     let point = Position::new(event.column, event.row);
     let key = match event.kind {
         MouseEventKind::Moved if app.user.heatmap => {
@@ -1297,6 +1431,19 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
             Some(KeyCode::PageUp)
         }
         MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(index) = index_cells(app, outer[0])
+                .iter()
+                .position(|r| r.contains(point))
+            {
+                let cells = index_cells(app, outer[0]);
+                if cells.len() < app.config.pinned_indices.len() && index + 1 == cells.len() {
+                    app.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+                } else {
+                    let id = app.config.pinned_indices[index].clone();
+                    app.preview_index(&id);
+                }
+                return;
+            }
             if outer[4].contains(point) {
                 if event.column < outer[4].x + 8 {
                     Some(KeyCode::Char('m'))
@@ -1548,14 +1695,14 @@ mod price_axis_tests {
             (1_0000, 5000_0000),
             (274_1234, 284_5678),
         ] {
-            let ticks = price_scale(Price(low), Price(high), 30);
+            let ticks = price_scale(Price(low), Price(high), 30, 2);
             assert!(ticks[0] * 100 <= low);
             assert!(ticks[ticks.len() - 1] * 100 >= high);
             let step = ticks[1] - ticks[0];
             assert!(step > 0);
             assert!(ticks.windows(2).all(|w| w[1] - w[0] == step));
         }
-        assert!(price_scale(Price(275100), Price(313100), 40).len() > 3);
-        assert!(price_scale(Price(275100), Price(313100), 6).len() <= 5);
+        assert!(price_scale(Price(275100), Price(313100), 40, 2).len() > 3);
+        assert!(price_scale(Price(275100), Price(313100), 6, 2).len() <= 5);
     }
 }

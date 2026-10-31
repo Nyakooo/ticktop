@@ -290,5 +290,8 @@ pub struct Catalog {
     pub stocks: Vec<Instrument>,
 }
 pub fn bundled_catalog() -> Catalog {
-    serde_json::from_str(include_str!("../assets/stocks.json")).expect("validated bundled catalog")
+    let mut catalog: Catalog = serde_json::from_str(include_str!("../assets/stocks.json"))
+        .expect("validated bundled catalog");
+    crate::instruments::merge(&mut catalog.stocks);
+    catalog
 }

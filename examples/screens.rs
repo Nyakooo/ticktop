@@ -15,21 +15,38 @@ fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&out)?;
     // Optional second argument renders an existing live cache without fetching data
     // or overwriting the user's mode and view preferences.
-    let live_data = std::env::args().nth(2).map(std::path::PathBuf::from);
+    let indices_preview = std::env::args().any(|s| s == "--indices");
+    let live_data = std::env::args()
+        .nth(2)
+        .filter(|s| s != "--indices")
+        .map(std::path::PathBuf::from);
     let demo = live_data.is_none();
     let data = live_data.unwrap_or_else(|| out.join("data"));
     let mut app = App::new(Config::default(), Paths::resolve(Some(&data))?, false, demo)?;
+    if indices_preview {
+        app.config.pinned_indices = ticktop::instruments::INDICES
+            .iter()
+            .take(5)
+            .map(|(id, _)| (*id).to_string())
+            .collect();
+        app.user.add("sh510300", 0)?;
+        app.user.selected = Some("sh510300".into());
+    }
     if demo {
         app.on_market(MarketEvent::Quotes(market::demo_quotes(
-            &app.user.watchlist,
+            &app.request().symbols,
         )));
         app.on_market(MarketEvent::Chart(market::demo_history(
             app.user.selected.as_deref().unwrap(),
             app.user.period,
         )));
-        app.on_market(MarketEvent::Chips(ticktop::chips::demo(
-            app.user.selected.as_deref().unwrap(),
-        )));
+        if !ticktop::instruments::is_index(app.user.selected.as_deref().unwrap())
+            && !ticktop::instruments::is_etf(app.user.selected.as_deref().unwrap())
+        {
+            app.on_market(MarketEvent::Chips(ticktop::chips::demo(
+                app.user.selected.as_deref().unwrap(),
+            )));
+        }
         app.on_market(MarketEvent::Sectors(ticktop::sectors::demo(
             ticktop::sectors::Category::Industry,
         )));

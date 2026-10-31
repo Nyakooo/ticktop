@@ -17,19 +17,21 @@ impl Instrument {
             Some("sh") => "沪",
             Some("sz") => "深",
             Some("bj") => "北",
+            Some("hk") => "港",
             _ => "?",
         }
     }
 }
 pub fn valid_id(id: &str) -> bool {
-    id.len() == 8
-        && matches!(id.get(..2), Some("sh" | "sz" | "bj"))
-        && id
-            .get(2..)
-            .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit()))
+    id == "hkHSI"
+        || (id.len() == 8
+            && matches!(id.get(..2), Some("sh" | "sz" | "bj"))
+            && id
+                .get(2..)
+                .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit())))
 }
 
-/// Prices in ten-thousandths of CNY. Never parse decimal prices via binary float.
+/// Prices or index points in ten-thousandths. Never parse decimal prices via binary float.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Price(pub i64);
 impl Price {

@@ -11,6 +11,8 @@ fn normalize(s: &str) -> String {
 struct Entry {
     stock: Instrument,
     name: String,
+    code: String,
+    id: String,
     spellings: Vec<String>,
 }
 pub struct SearchIndex {
@@ -22,7 +24,13 @@ impl SearchIndex {
             entries: stocks
                 .iter()
                 .map(|stock| {
-                    let name = normalize(&stock.name);
+                    let name = normalize(&if crate::instruments::is_etf(&stock.id)
+                        && !stock.name.to_uppercase().contains("ETF")
+                    {
+                        format!("{}ETF", stock.name)
+                    } else {
+                        stock.name.clone()
+                    });
                     // Expand polyphonic names (银行 / 重庆 / 长江), bounded to avoid
                     // exponential growth. Both full spellings and initials are indexed.
                     let mut variants = vec![(String::new(), String::new())];
@@ -58,6 +66,8 @@ impl SearchIndex {
                     spellings.dedup();
                     Entry {
                         stock: stock.clone(),
+                        code: normalize(stock.code()),
+                        id: normalize(&stock.id),
                         name,
                         spellings,
                     }
@@ -76,9 +86,18 @@ impl SearchIndex {
             .entries
             .iter()
             .filter_map(|e| {
-                let fields = [e.stock.code(), e.name.as_str()]
-                    .into_iter()
-                    .chain(e.spellings.iter().map(String::as_str));
+                let fields = [
+                    e.code.as_str(),
+                    e.name.as_str(),
+                    e.id.as_str(),
+                    if crate::instruments::is_etf(&e.stock.id) {
+                        "etf"
+                    } else {
+                        crate::instruments::kind(&e.stock.id)
+                    },
+                ]
+                .into_iter()
+                .chain(e.spellings.iter().map(String::as_str));
                 let score = fields
                     .clone()
                     .filter_map(|s| {

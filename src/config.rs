@@ -5,10 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(
-    version,
-    about = "免费的 A 股终端看盘工具 / A quiet A-share market terminal"
-)]
+#[command(version, about = "免费的终端行情看板 / A quiet market terminal")]
 pub struct Cli {
     #[arg(long, conflicts_with = "full")]
     pub minimal: bool,
@@ -110,15 +107,44 @@ impl Default for Refresh {
         }
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub default_mode: Mode,
     pub network: Network,
     pub refresh: Refresh,
+    #[serde(default = "default_pinned_indices")]
+    pub pinned_indices: Vec<String>,
+}
+fn default_pinned_indices() -> Vec<String> {
+    vec!["sh000001".into()]
+}
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            default_mode: Mode::default(),
+            network: Network::default(),
+            refresh: Refresh::default(),
+            pinned_indices: default_pinned_indices(),
+        }
+    }
 }
 impl Config {
     pub fn validate(&self) -> Result<()> {
+        if self.pinned_indices.len() > 6
+            || self
+                .pinned_indices
+                .iter()
+                .any(|id| !crate::instruments::is_index(id))
+            || self
+                .pinned_indices
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != self.pinned_indices.len()
+        {
+            bail!("常驻栏仅支持最多 6 个不重复的已支持指数");
+        }
         if !(2..=3600).contains(&self.refresh.quotes_secs)
             || !(2..=3600).contains(&self.refresh.chart_secs)
             || !(2..=3600).contains(&self.refresh.sectors_secs)

@@ -277,7 +277,7 @@ fn search_accepts_chinese_and_does_not_trigger_global_shortcuts() {
 fn add_search_selects_target_group_and_persists() {
     let (_dir, mut app) = app();
     app.key(key(KeyCode::Char('a')));
-    for c in "000001".chars() {
+    for c in "sz000001".chars() {
         app.key(key(KeyCode::Char(c)));
     }
     app.key(key(KeyCode::Enter));
@@ -886,4 +886,124 @@ fn chart_price_readout_tracks_sample_not_live_quote() {
     assert!(screen(&app, 160, 42).contains("末价 123.45 CNY"));
     app.chart_cursor = Some(0);
     assert!(screen(&app, 160, 42).contains(&format!("查看 {} CNY", series.points[0].price)));
+}
+
+#[test]
+fn resident_indices_can_be_configured_disabled_and_opened_without_changing_groups() {
+    let (_dir, mut app) = app();
+    app.key(key(KeyCode::Char('i')));
+    assert!(matches!(app.modal, Some(Modal::Settings { field: 6, .. })));
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    for c in "上证指数,深证成指,恒生指数,科创50,沪深300".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    app.key(key(KeyCode::Enter));
+    assert!(app.modal.is_none());
+    assert_eq!(app.config.pinned_indices.len(), 5);
+    let saved = app.paths.load_config().unwrap().0;
+    assert_eq!(saved.pinned_indices, app.config.pinned_indices);
+    let symbols = app.request().symbols;
+    assert!(
+        app.config
+            .pinned_indices
+            .iter()
+            .all(|s| symbols.contains(s))
+    );
+    assert_eq!(symbols.iter().filter(|s| *s == "sh000001").count(), 1);
+    app.on_market(MarketEvent::Quotes(market::demo_quotes(&symbols)));
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for heat in [false, true] {
+            app.user.heatmap = heat;
+            let rendered = screen(&app, 160, 42);
+            assert!(rendered.contains(if mode == Mode::Full {
+                "上证指数"
+            } else {
+                "sh000001"
+            }));
+        }
+    }
+    let previous = app.user.watchlist.clone();
+    app.preview_index("hkHSI");
+    assert_eq!(app.user.selected.as_deref(), Some("hkHSI"));
+    assert!(!app.user.heatmap);
+    assert_eq!(app.user.watchlist, previous);
+    app.key(key(KeyCode::Char('i')));
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.key(key(KeyCode::Enter));
+    assert!(app.config.pinned_indices.is_empty());
+    assert!(!app.request().symbols.contains(&"sh000001".into()));
+}
+#[test]
+fn etf_detail_and_minimal_mode_keep_third_decimal_and_no_chip_model() {
+    let (_dir, mut app) = app();
+    app.user.add("sh510300", 0).unwrap();
+    app.user.selected = Some("sh510300".into());
+    app.user.heatmap = false;
+    let quotes = market::parse_quotes(include_str!("fixtures/indices-etfs.txt")).unwrap();
+    app.on_market(MarketEvent::Quotes(quotes));
+    app.on_market(MarketEvent::Chart(market::demo_history(
+        "sh510300",
+        app.user.period,
+    )));
+    app.user.mode = Mode::Full;
+    let full = screen(&app, 160, 42);
+    assert!(full.contains("4.065"));
+    assert!(!full.contains("筹码峰"));
+    assert!(!full.contains("筹码估算 加载中"));
+    app.user.mode = Mode::Minimal;
+    assert!(screen(&app, 160, 42).contains("4.065"));
+}
+
+#[test]
+fn multi_index_headers_keep_cloud_geometry_and_mouse_targets_in_sync() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (_dir, mut app) = app();
+    app.config.pinned_indices = ticktop::instruments::INDICES
+        .iter()
+        .take(6)
+        .map(|(id, _)| (*id).to_string())
+        .collect();
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for (w, h) in [(160, 42), (100, 30), (46, 16)] {
+            let _ = screen(&app, w, h);
+            app.set_viewport(w, h);
+            let r = ui::content_area(&app, w, h);
+            assert_eq!(
+                (app.cloud_columns, app.cloud_page_size),
+                App::cloud_dimensions(r.width, r.height, mode)
+            );
+        }
+    }
+    app.user.mode = Mode::Full;
+    let small = screen(&app, 46, 16);
+    assert!(small.contains("+5 项"));
+    ui::mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        },
+        46,
+        16,
+    );
+    assert!(matches!(app.modal, Some(Modal::Settings { field: 6, .. })));
+    app.key(key(KeyCode::Esc));
+    let before = app.user.watchlist.clone();
+    ui::mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        },
+        160,
+        42,
+    );
+    assert_eq!(app.user.selected.as_deref(), Some("sh000001"));
+    assert_eq!(app.user.watchlist, before);
 }

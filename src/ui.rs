@@ -505,6 +505,30 @@ fn chip_panel(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     )));
     f.render_widget(Paragraph::new(lines), r);
 }
+// Use cent-based, evenly spaced ticks: Ratatui positions axis labels uniformly.
+// Rounding arbitrary floats only at display time can produce misleading/repeated labels.
+fn price_scale(min: crate::model::Price, max: crate::model::Price, height: u16) -> Vec<i64> {
+    let low = min.0.div_euclid(100);
+    let high = (max.0 + 99).div_euclid(100);
+    let padding = ((high - low) * 12 / 100).max(high / 1000).max(1);
+    let low = (low - padding).max(0);
+    let high = high + padding;
+    let intervals = (height.saturating_sub(3) / 2).clamp(2, 12) as i64;
+    let rough = ((high - low) + intervals - 1) / intervals;
+    let mut magnitude = 1;
+    while magnitude * 10 < rough {
+        magnitude *= 10;
+    }
+    let step = [1, 2, 5, 10]
+        .into_iter()
+        .map(|n| n * magnitude)
+        .find(|n| *n >= rough)
+        .unwrap();
+    let start = low.div_euclid(step) * step;
+    let end = ((high + step - 1) / step) * step;
+    (start..=end).step_by(step as usize).collect()
+}
+
 fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let Some(s) = app.series().filter(|s| !s.points.is_empty()) else {
         f.render_widget(
@@ -527,10 +551,31 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .enumerate()
         .map(|(i, p)| (i as f64, p.price.as_f64()))
         .collect();
-    let min = points.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
-    let max = points.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
-    let padding = ((max - min) * 0.12).max(max.abs() * 0.001).max(0.01);
-    let bounds = [min - padding, max + padding];
+    let min = s.points.iter().map(|p| p.price).min().unwrap();
+    let max = s.points.iter().map(|p| p.price).max().unwrap();
+    let ticks = price_scale(min, max, r.height.saturating_sub(1));
+    let bounds = [ticks[0] as f64 / 100., ticks[ticks.len() - 1] as f64 / 100.];
+    let selected = app
+        .chart_cursor
+        .unwrap_or(points.len() - 1)
+        .min(points.len() - 1);
+    let selected_point = &s.points[selected];
+    let caption = format!(
+        "{} {} CNY  {}",
+        if app.chart_cursor.is_some() {
+            "查看"
+        } else {
+            "末价"
+        },
+        selected_point.price,
+        selected_point.label
+    );
+    let areas = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).split(r);
+    f.render_widget(
+        Paragraph::new(caption).style(Style::default().fg(p.fg)),
+        areas[0],
+    );
+    let r = areas[1];
     let xmax = (points.len().saturating_sub(1) as f64).max(1.);
     let color = app
         .user
@@ -547,12 +592,20 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             .style(Style::default().fg(color))
             .data(&points),
     ];
+    let price_guide = [(0., points[selected].1), (xmax, points[selected].1)];
+    let selected_dot = [points[selected]];
+    datasets.push(
+        Dataset::default()
+            .marker(Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(p.line))
+            .data(&price_guide),
+    );
     let guide;
-    let dot;
     if let Some(i) = app.chart_cursor {
         let pt = points[i.min(points.len() - 1)];
         guide = vec![(pt.0, bounds[0]), (pt.0, bounds[1])];
-        dot = vec![pt];
+
         datasets.push(
             Dataset::default()
                 .marker(Marker::Braille)
@@ -560,13 +613,13 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 .style(Style::default().fg(p.line))
                 .data(&guide),
         );
-        datasets.push(
-            Dataset::default()
-                .marker(Marker::Dot)
-                .style(Style::default().fg(p.accent))
-                .data(&dot),
-        );
     }
+    datasets.push(
+        Dataset::default()
+            .marker(Marker::Braille)
+            .style(Style::default().fg(p.accent))
+            .data(&selected_dot),
+    );
     let labels = if points.len() > 1 {
         vec![
             Span::raw(s.points[0].label.clone()),
@@ -576,8 +629,15 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     } else {
         vec![Span::raw(s.points[0].label.clone())]
     };
-    let ylabels =
-        [bounds[0], (bounds[0] + bounds[1]) / 2., bounds[1]].map(|n| Span::raw(format!("{n:.2}")));
+    let ylabels = ticks
+        .into_iter()
+        .map(|cents| {
+            Span::styled(
+                format!("{}.{:02}", cents / 100, cents % 100),
+                Style::default().fg(p.dim),
+            )
+        })
+        .collect::<Vec<_>>();
     let chart = Chart::new(datasets)
         .x_axis(
             Axis::default()
@@ -1473,5 +1533,29 @@ mod cloud_tests {
         assert_eq!(tiles[1].area(), 200);
         assert_eq!(tiles[0].intersection(tiles[1]).area(), 0);
         assert_eq!(tiles.iter().map(|r| r.area()).sum::<u32>(), area.area());
+    }
+}
+
+#[cfg(test)]
+mod price_axis_tests {
+    use super::price_scale;
+    use crate::model::Price;
+    #[test]
+    fn price_ticks_are_exact_distinct_even_and_cover_samples() {
+        for (low, high) in [
+            (10000, 10100),
+            (268_5000, 268_5000),
+            (1_0000, 5000_0000),
+            (274_1234, 284_5678),
+        ] {
+            let ticks = price_scale(Price(low), Price(high), 30);
+            assert!(ticks[0] * 100 <= low);
+            assert!(ticks[ticks.len() - 1] * 100 >= high);
+            let step = ticks[1] - ticks[0];
+            assert!(step > 0);
+            assert!(ticks.windows(2).all(|w| w[1] - w[0] == step));
+        }
+        assert!(price_scale(Price(275100), Price(313100), 40).len() > 3);
+        assert!(price_scale(Price(275100), Price(313100), 6).len() <= 5);
     }
 }

@@ -872,3 +872,18 @@ async fn live_chips_daily_source() {
         d.seed_remaining * 100.
     );
 }
+
+#[test]
+fn chart_price_readout_tracks_sample_not_live_quote() {
+    let (_dir, mut app) = app();
+    app.user.mode = Mode::Full;
+    app.user.heatmap = false;
+    let id = app.user.selected.clone().unwrap();
+    let mut series = market::demo_history(&id, app.user.period);
+    let last = series.points.len() - 1;
+    series.points[last].price = Price(1234500);
+    app.on_market(MarketEvent::Chart(series.clone()));
+    assert!(screen(&app, 160, 42).contains("末价 123.45 CNY"));
+    app.chart_cursor = Some(0);
+    assert!(screen(&app, 160, 42).contains(&format!("查看 {} CNY", series.points[0].price)));
+}

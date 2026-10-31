@@ -28,12 +28,14 @@ pub enum Kind {
     Quotes,
     Chart,
     Catalog,
+    Chips,
     Sectors,
 }
 pub enum MarketEvent {
     Quotes(Vec<Quote>),
     Chart(Series),
     Catalog(Catalog),
+    Chips(crate::chips::Distribution),
     Sectors(crate::sectors::Snapshot),
     Error {
         kind: Kind,
@@ -356,6 +358,7 @@ fn same_job(a: &Request, b: &Request, kind: Kind) -> bool {
                     && a.config.refresh.chart_secs == b.config.refresh.chart_secs
             }
             Kind::Catalog => true,
+            Kind::Chips => a.focus == b.focus && a.heatmap_enabled == b.heatmap_enabled,
             Kind::Sectors => {
                 a.heatmap_enabled == b.heatmap_enabled
                     && a.sector_category == b.sector_category
@@ -364,7 +367,13 @@ fn same_job(a: &Request, b: &Request, kind: Kind) -> bool {
         }
 }
 pub fn spawn_workers(rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>) {
-    for kind in [Kind::Quotes, Kind::Chart, Kind::Catalog, Kind::Sectors] {
+    for kind in [
+        Kind::Quotes,
+        Kind::Chart,
+        Kind::Catalog,
+        Kind::Sectors,
+        Kind::Chips,
+    ] {
         tokio::spawn(worker(rx.clone(), tx.clone(), kind));
     }
 }
@@ -421,6 +430,9 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                         job.focus.as_deref().unwrap_or("sz300750"),
                         job.period,
                     )),
+                    Kind::Chips => MarketEvent::Chips(crate::chips::demo(
+                        job.focus.as_deref().unwrap_or("sz300750"),
+                    )),
                     Kind::Catalog => return Err(anyhow::anyhow!("demo catalog uses bundled data")),
                     Kind::Sectors => {
                         MarketEvent::Sectors(crate::sectors::demo(job.sector_category))
@@ -434,12 +446,16 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                     history(h, job.focus.as_deref().context("no selection")?, job.period).await?,
                 ),
                 Kind::Catalog => MarketEvent::Catalog(catalog(h).await?),
+                Kind::Chips => MarketEvent::Chips(
+                    crate::chips::fetch(h, job.focus.as_deref().context("no selection")?).await?,
+                ),
                 Kind::Sectors => {
                     MarketEvent::Sectors(crate::sectors::fetch(h, job.sector_category).await?)
                 }
             })
         };
-        if (kind == Kind::Chart && job.focus.is_none())
+        if (kind == Kind::Chips && (job.focus.is_none() || job.heatmap_enabled))
+            || (kind == Kind::Chart && job.focus.is_none())
             || (kind == Kind::Catalog && job.demo)
             || (kind == Kind::Sectors && !job.heatmap_enabled)
         {
@@ -461,6 +477,7 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             Kind::Quotes => request.config.refresh.quotes_secs,
             Kind::Chart => request.config.refresh.chart_secs,
             Kind::Catalog => 86400,
+            Kind::Chips => 1800,
             Kind::Sectors => request.config.refresh.sectors_secs,
         };
         let delay = match result {

@@ -27,6 +27,9 @@ fn main() -> anyhow::Result<()> {
             app.user.selected.as_deref().unwrap(),
             app.user.period,
         )));
+        app.on_market(MarketEvent::Chips(ticktop::chips::demo(
+            app.user.selected.as_deref().unwrap(),
+        )));
         app.on_market(MarketEvent::Sectors(ticktop::sectors::demo(
             ticktop::sectors::Category::Industry,
         )));

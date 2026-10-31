@@ -57,6 +57,9 @@ pub struct App {
     pub message: String,
     pub quote_error: Option<String>,
     pub chart_error: Option<String>,
+    pub chip_error: Option<String>,
+    pub chips: HashMap<String, crate::chips::Distribution>,
+    pending_chips: HashMap<String, crate::chips::Distribution>,
     pub catalog_error: Option<String>,
     pub sectors: HashMap<crate::sectors::Category, crate::sectors::Snapshot>,
     pub sector_error: Option<String>,
@@ -135,6 +138,9 @@ impl App {
             message: String::new(),
             quote_error: None,
             chart_error: None,
+            chip_error: None,
+            chips: HashMap::new(),
+            pending_chips: HashMap::new(),
             catalog_error: None,
             sectors,
             sector_error: None,
@@ -356,6 +362,13 @@ impl App {
     }
     fn load_chart(&mut self) {
         if let Some(id) = &self.user.selected {
+            if !self.chips.contains_key(id)
+                && let Ok(Some(d)) = self
+                    .cache
+                    .read::<crate::chips::Distribution>(&format!("chips:v1:{id}"))
+            {
+                self.chips.insert(id.clone(), d);
+            }
             let key = (id.clone(), self.user.period);
             if !self.charts.contains_key(&key) {
                 match self.cache.series(id, self.user.period) {
@@ -369,6 +382,7 @@ impl App {
         }
         self.chart_cursor = None;
         self.chart_error = None;
+        self.chip_error = None;
     }
     pub fn on_market(&mut self, event: MarketEvent) {
         match event {
@@ -403,6 +417,17 @@ impl App {
                     self.pending_quotes = Some(cached);
                 } else {
                     self.quotes = merged;
+                }
+            }
+            MarketEvent::Chips(d) => {
+                self.chip_error = None;
+                if self.cache.write(&format!("chips:v1:{}", d.id), &d).is_err() {
+                    self.message = "筹码缓存写入失败".into();
+                }
+                if self.paused {
+                    self.pending_chips.insert(d.id.clone(), d);
+                } else {
+                    self.chips.insert(d.id.clone(), d);
                 }
             }
             MarketEvent::Chart(s) => {
@@ -459,6 +484,7 @@ impl App {
                 match kind {
                     Kind::Quotes => self.quote_error = Some(msg),
                     Kind::Chart => self.chart_error = Some(msg),
+                    Kind::Chips => self.chip_error = Some(msg),
                     Kind::Sectors => self.sector_error = Some(msg),
                     Kind::Catalog => {
                         self.catalog_error = Some("名单更新失败，继续使用本地索引".into())
@@ -476,6 +502,7 @@ impl App {
             if let Some(quotes) = self.pending_quotes.take() {
                 self.quotes = quotes.into_iter().map(|q| (q.id.clone(), q)).collect();
             }
+            self.chips.extend(self.pending_chips.drain());
             for s in self.pending_charts.drain(..) {
                 self.charts.insert((s.id.clone(), s.period), s);
             }

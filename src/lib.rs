@@ -1,4 +1,5 @@
 pub mod app;
+pub mod chips;
 pub mod config;
 pub mod market;
 pub mod model;

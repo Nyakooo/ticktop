@@ -109,3 +109,10 @@ User rejected the dense squarified reference-style experiment. Restored ordered 
 Initial v0.1.0 release preparation: branding uses Ticktop for display and ticktop for repository, crate and command names. Repository has been renamed to Nyakooo/ticktop; the user authorized public visibility and publication. Local release checks passed: 47 Rust tests (2 opt-in tests ignored), Clippy with warnings denied, format checking, abrupt-restart mode smoke, real PTY smoke, and 8 installer tests. A source scan found no private-key, GitHub-token or AWS-access-key patterns. README now links the four planned release archives and checksums; anonymous asset and installation verification remains a post-publication step.
 
 Release review: Standards axis found one terminal-lifecycle cleanup issue; fixed with TerminalGuard, covering mouse-capture setup errors and panic unwinding, and reviewer confirmed closure. Spec axis found no functional release blocker; public asset availability and anonymous installation remain post-publication gates. Consolidated SPEC to the final accepted behavior, removing superseded numeric-only/equal-area/experimental treemap requirements. Follow-up Clippy and real PTY smoke passed; credential scan across all five local commits found no configured token/private-key patterns.
+
+
+## 筹码峰增量验证（2026-10-31）
+
+- 新增日 K 线字段解析、换手衰减/归一化、平价/零换手、无效数据、双模式多尺寸渲染、暂停恢复及缓存重启测试。
+- 实际 TUI 渲染预览由 `examples/screens.rs` 生成，演示数据明确标识。
+- 东方财富日线接口最初经 Python 成功返回 240 条日线；后续 Python 与 Rust 请求均被远端断连。opt-in `live_chips_daily_source` 未通过，不能据此宣称实时数据接入稳定。失败展示不可用或保留已有缓存，不以演示数据替代。

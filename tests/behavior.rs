@@ -818,3 +818,57 @@ fn hovering_the_treemap_updates_details_without_repeated_redraws() {
     ui::mouse(&mut app, event, 80, 24);
     assert!(!app.dirty);
 }
+
+#[test]
+fn chips_render_both_modes_and_freeze_while_paused() {
+    let (_dir, mut app) = app();
+    let id = app.user.selected.clone().unwrap();
+    app.user.heatmap = false;
+    let d = ticktop::chips::demo(&id);
+    app.on_market(MarketEvent::Chips(d.clone()));
+    for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16), (30, 10)] {
+        app.user.mode = Mode::Full;
+        let full = screen(&app, w, h);
+        if w >= 100 {
+            assert!(full.contains("筹码峰"));
+            assert!(full.contains("90%"));
+        }
+        app.user.mode = Mode::Minimal;
+        let minimal = screen(&app, w, h);
+        if w >= 80 {
+            assert!(minimal.contains("筹码估算"));
+            assert!(minimal.contains("90%"));
+        }
+    }
+    app.key(key(KeyCode::Char(' ')));
+    let mut changed = d.clone();
+    changed.close += 1.;
+    app.on_market(MarketEvent::Chips(changed.clone()));
+    assert_eq!(app.chips[&id].close, d.close);
+    app.key(key(KeyCode::Char(' ')));
+    assert_eq!(app.chips[&id].close, changed.close);
+    // Cache is isolated per symbol and survives a restart.
+    let reopened = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+    assert_eq!(reopened.chips[&id].close, changed.close);
+}
+
+#[tokio::test]
+#[ignore = "requires public network; opt-in upstream contract check"]
+async fn live_chips_daily_source() {
+    let http = market::client(&Config::default().network).unwrap();
+    let d = ticktop::chips::fetch(&http, "sz300750").await.unwrap();
+    assert_eq!(d.id, "sz300750");
+    assert!(d.days >= 100 && d.days <= 240);
+    assert!((d.bins.iter().map(|b| b.1).sum::<f64>() - 1.).abs() < 1e-8);
+    assert!(d.quantile(0.05) <= d.average() && d.average() <= d.quantile(0.95));
+    println!(
+        "{} {} {} days; mean {:.2}; 90% {:.2}–{:.2}; seed {:.2}%",
+        d.id,
+        d.date,
+        d.days,
+        d.average(),
+        d.quantile(0.05),
+        d.quantile(0.95),
+        d.seed_remaining * 100.
+    );
+}

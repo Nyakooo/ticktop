@@ -387,7 +387,17 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         })
         .collect::<Vec<_>>();
     f.render_widget(Paragraph::new(Line::from(tabs)), rows[2]);
-    price_chart(f, app, rows[3], p);
+    if rows[3].width >= 66 {
+        let panes = Layout::horizontal([Constraint::Min(30), Constraint::Length(31)])
+            .spacing(2)
+            .split(rows[3]);
+        price_chart(f, app, panes[0], p);
+        chip_panel(f, app, panes[1], p);
+    } else {
+        let panes = Layout::vertical([Constraint::Min(2), Constraint::Length(4)]).split(rows[3]);
+        price_chart(f, app, panes[0], p);
+        chip_panel(f, app, panes[1], p);
+    }
     let readout = if let Some(s) = app.series() {
         if let Some(i) = app.chart_cursor {
             let pt = &s.points[i.min(s.points.len().saturating_sub(1))];
@@ -429,6 +439,71 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         Paragraph::new(source).style(Style::default().fg(p.dim)),
         rows[5],
     );
+}
+fn chip_panel(f: &mut Frame, app: &App, r: Rect, p: Palette) {
+    let d = app.user.selected.as_ref().and_then(|id| app.chips.get(id));
+    let Some(d) = d else {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from("筹码峰 · 估算"),
+                Line::from(if app.chip_error.is_some() {
+                    "数据暂不可用，稍后重试"
+                } else {
+                    "日线数据加载中…"
+                }),
+            ])
+            .style(Style::default().fg(p.dim)),
+            r,
+        );
+        return;
+    };
+    let mut lines = vec![Line::from(text("筹码峰 · 估算 / 独立价格轴", p.accent))];
+    let count = r.height.saturating_sub(6) as usize;
+    if count >= 3 {
+        let mut rows = vec![(0., 0.); count];
+        for (i, &(price, weight)) in d.bins.iter().enumerate() {
+            let index = (i * count / d.bins.len()).min(count - 1);
+            rows[index].0 = price;
+            rows[index].1 += weight;
+        }
+        let max = rows.iter().map(|b| b.1).fold(0., f64::max).max(1e-12);
+        let width = r.width.saturating_sub(11) as usize;
+        for (price, weight) in rows.into_iter().rev() {
+            let len = (weight / max * width as f64).round() as usize;
+            lines.push(Line::from(vec![
+                text(format!("{price:>8.2} "), p.dim),
+                text(
+                    "▇".repeat(len),
+                    if price <= d.close { p.up } else { p.down },
+                ),
+            ]));
+        }
+    }
+    lines.push(Line::from(text(
+        format!("估算均价 {:.2}", d.average()),
+        p.fg,
+    )));
+    lines.push(Line::from(text(
+        format!("90% {:.2}–{:.2}", d.quantile(0.05), d.quantile(0.95)),
+        p.fg,
+    )));
+    lines.push(Line::from(text(
+        format!("日线获利比例 {:.1}%", d.profit()),
+        p.dim,
+    )));
+    lines.push(Line::from(text(
+        format!("截至 {} · {}日", d.date, d.days),
+        p.dim,
+    )));
+    lines.push(Line::from(text(
+        if app.chip_error.is_some() {
+            "更新失败 · 保留缓存".into()
+        } else {
+            format!("前复权 · 初始残留 {:.1}%", d.seed_remaining * 100.)
+        },
+        p.dim,
+    )));
+    f.render_widget(Paragraph::new(lines), r);
 }
 fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let Some(s) = app.series().filter(|s| !s.points.is_empty()) else {
@@ -520,7 +595,7 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     f.render_widget(chart, r);
 }
 fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
-    let areas = Layout::vertical([Constraint::Min(4), Constraint::Length(3)]).split(r);
+    let areas = Layout::vertical([Constraint::Min(4), Constraint::Length(5)]).split(r);
     let ids = app.visible();
     let rows = ids
         .iter()
@@ -570,6 +645,27 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 samples.push(s.points[idx].price.to_string());
             }
         }
+    }
+    if let Some(d) = app.user.selected.as_ref().and_then(|id| app.chips.get(id)) {
+        samples.push(format!(
+            "\n筹码估算  均价 {:.2}  90% {:.2}–{:.2}  日线获利 {:.1}%  截至 {}{}",
+            d.average(),
+            d.quantile(0.05),
+            d.quantile(0.95),
+            d.profit(),
+            d.date,
+            if app.chip_error.is_some() {
+                " / 更新失败，保留缓存"
+            } else {
+                ""
+            }
+        ));
+    } else {
+        samples.push(if app.chip_error.is_some() {
+            "\n筹码估算 暂不可用".into()
+        } else {
+            "\n筹码估算 加载中…".into()
+        });
     }
     f.render_widget(
         Paragraph::new(samples.join("   "))

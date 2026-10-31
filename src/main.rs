@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::channel(32);
     market::spawn_workers(request_rx, event_tx);
     let mut terminal = ratatui::init();
+    let terminal_guard = TerminalGuard;
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -84,12 +85,21 @@ async fn main() -> Result<()> {
             }
         }Ok(())
     }.await;
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
-    ratatui::restore();
+    drop(terminal_guard);
     drop(request_tx);
     app.persist()?;
     result
 }
+// Install immediately after terminal initialization so early errors and panic
+// unwinding also disable mouse reporting and restore the terminal.
+struct TerminalGuard;
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        ratatui::restore();
+    }
+}
+
 #[cfg(unix)]
 async fn terminate_signal() {
     use tokio::signal::unix::{SignalKind, signal};

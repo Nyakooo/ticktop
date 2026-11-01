@@ -2,6 +2,7 @@
 """Native Windows ConPTY check, using pywinpty only on the CI/test machine."""
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -31,17 +32,21 @@ with tempfile.TemporaryDirectory(prefix='ticktop-conpty-') as data:
             if condition():
                 return
             time.sleep(0.05)
-        raise AssertionError(message + '\n' + ''.join(chunks)[-2000:])
+        trace = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', ''.join(chunks))
+        raise AssertionError(message + '\n' + trace[:1200] + '\n...\n' + trace[-1200:])
 
     process, chunks = launch('--full')
     try:
         wait_for(lambda: 'ticktop_' in ''.join(chunks), chunks, 'initial screen missing')
-        process.write('/')
+        process.write('a')
         time.sleep(0.15)
-        process.write('宁德')
-        wait_for(lambda: '宁德' in ''.join(chunks), chunks, 'Chinese input missing')
+        process.write('平安银行')
+        time.sleep(0.2)
         process.write('\r')
-        time.sleep(0.15)
+        time.sleep(0.2)
+        process.write('\r')
+        state_path = Path(data, 'demo-state.json')
+        wait_for(lambda: state_path.exists() and 'sz000001' in json.loads(state_path.read_text(encoding='utf-8'))['watchlist'], chunks, 'Chinese stock search/add failed')
         process.write('i')
         time.sleep(0.15)
         process.write('\x15')

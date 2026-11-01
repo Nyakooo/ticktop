@@ -14,24 +14,31 @@
 
 ## 下载与安装
 
-支持 **Linux / macOS**，下载对应版本即可使用，无需安装 Rust。当前支持 A 股、沪深 ETF 和常用指数（含恒生指数）。
+支持 **Windows 10/11 x64、Linux / macOS**，下载对应版本即可使用，无需安装 Rust。当前支持 A 股、沪深 ETF 和常用指数（含恒生指数）。
 
 | 系统 | 芯片架构 | 下载 | 校验 |
 | --- | --- | --- | --- |
-| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
-| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
-| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
-| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.2.0/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
+| Windows | x86_64 / AMD64 | [下载 ZIP](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-pc-windows-msvc.zip) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-pc-windows-msvc.zip.sha256) |
+| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
+| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
+| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
+| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
 
-解压后，在终端进入解压目录，运行 `./ticktop`。
+Windows 解压后在 Windows Terminal / PowerShell 中运行 `.\ticktop.exe`；Linux / macOS 运行 `./ticktop`。
 
-也可以一键安装到 PATH：
+**Windows PowerShell 一键安装**（无需管理员权限，自动加入用户 PATH）：
+
+```powershell
+irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
+```
+
+**Linux / macOS / Windows Git Bash：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.sh | bash
 ```
 
-安装后按提示重新打开终端，输入 `ticktop` 即可。更新使用 `ticktop update`。
+安装后输入 `ticktop` 即可，其他已打开的终端需重启以刷新 PATH。Git Bash 的 MinTTY 窗口使用 `winpty ticktop`，也可直接在 Windows Terminal 的 PowerShell 中运行。更新统一使用 `ticktop update`。
 
 ## 怎么用
 

@@ -219,3 +219,26 @@ cargo run --release -- --check
 ```toml
 pinned_indices = ["sh000001", "sz399001", "hkHSI", "sh000688", "sh000300"]
 ```
+
+
+### Windows 原生安装
+
+支持 Windows 10/11 x64（Intel / AMD），使用 PowerShell 5.1+，无需 Rust、Git 或管理员权限。Windows ARM64 暂不提供原生安装包。
+
+```powershell
+irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
+```
+
+安装到 `%LOCALAPPDATA%\Ticktop\bin`，验证下载包 SHA-256 后替换程序，并仅向当前用户的 PATH 添加一次目录。当前 PowerShell 会立即更新 PATH；其他终端需彻底关闭后重新打开。自选和设置使用应用自身的用户数据目录，安装/升级不覆盖这些文件。
+
+Git Bash 也支持 README 中的 `curl ... | bash` 命令，自动调用 Windows PowerShell 安装原生 `.exe`。MinTTY 中请用 `winpty ticktop` 启动；Windows Terminal 的 PowerShell 可直接输入 `ticktop`。WSL 继续使用 Linux 安装包，与 Windows 原生版的数据目录独立。
+
+指定版本或目录可下载脚本后运行（目录须为绝对路径）：
+
+```powershell
+$env:TICKTOP_INSTALL_DIR = 'C:\Tools\Ticktop'
+$env:TICKTOP_VERSION = 'v0.3.0'
+irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
+```
+
+更新使用 `ticktop update`，无需 Bash。更新器校验并试运行新程序，随后将旧 `.exe` 改名备份再安装新版；若旧进程仍使用备份，退出后可在下次安装时自动清理。校验失败不会更换原程序或修改 PATH。安装器不会修改 PowerShell ExecutionPolicy 或系统级 PATH。

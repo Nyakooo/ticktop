@@ -105,7 +105,10 @@ jobs:
         shell: powershell
         run: |
           $directory = Join-Path $env:RUNNER_TEMP 'Ticktop installed test'
-          & ./scripts/install.ps1 -InstallDir $directory -Version '${{ github.ref_name }}' -NoPath
+          $env:TICKTOP_INSTALL_DIR = $directory
+          $env:TICKTOP_NO_PATH = '1'
+          $script = Invoke-RestMethod 'https://raw.githubusercontent.com/Nyakooo/ticktop/${{ github.ref_name }}/scripts/install.ps1'
+          Invoke-Expression $script
           $exe = Join-Path $directory 'ticktop.exe'
           & $exe --version
           if ($LASTEXITCODE -ne 0) { throw 'Installed binary failed' }

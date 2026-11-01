@@ -126,3 +126,12 @@ Release review: Standards axis found one terminal-lifecycle cleanup issue; fixed
 - `cargo clippy --locked --all-targets -- -D warnings`、`cargo fmt`、优化版构建通过。
 - `python3 scripts/pty_smoke.py target/release/ticktop`：真实 PTY 验证中文/ETF 搜索、常驻指数设置保存、分组、完整/简约、云图、暂停、鼠标、缩放、帮助与终端恢复通过。
 - `examples/screens --indices` 生成完整及简约模式的实际渲染预览；预览明确使用演示数据。
+
+
+## Windows 原生支持验证（2026-11-01 / v0.3.0）
+
+- Windows Server 2022 x64 runner 完成原生 MSVC 编译、Clippy 和 62 项 Rust 测试（4 项手动测试忽略）。CI 41289546653 的 Windows/Linux jobs 均成功。
+- Windows PowerShell 5.1 安装器实测：固定版本安装、中文/空格/方括号路径、用户/当前会话 PATH 去重、NoPath、运行中替换 exe、备份清理、个人数据保留、校验失败/路径穿越/版本不符拒绝并保留原安装。
+- pywinpty 3.0.2 的 Windows 终端实测：中文搜索并添加平安银行（按保存的代码确认）、ETF 预览、常驻设置、模式与云图、缩放、退出与重启恢复。测试依赖仅在 CI 使用，产品无 Python 依赖。
+- Linux 格式检查、Clippy、62 项 Rust 测试、PTY 操作、模式重启及 9 项 Bash 安装器测试通过；Git Bash 分发入口使用本地运输桩检查，确认委托 PowerShell 且不改 Unix rc 文件。
+- 发布矩阵新增 x86_64-pc-windows-msvc ZIP + SHA-256，使用静态 CRT；发布后 Windows job 对公开脚本安装、自更新和下载版 ConPTY 再次验证。

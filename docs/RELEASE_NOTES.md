@@ -1,35 +1,38 @@
-# Ticktop v0.2.0
+# Ticktop v0.3.0
 
-终端行情看板，只看盘，不交易。支持 Linux / macOS，无需安装 Rust、行情账号或 API Key。
+新增 Windows 原生支持。终端行情看板，只看盘，不交易。
 
-## 新增
+## Windows 安装
 
-- **ETF 与指数**：内置 1,715 个沪深 ETF，支持中文、完整代码、拼音、首字母与模糊搜索，可查看走势、加入自选分组。支持上证指数、深证成指、恒生指数、科创50、沪深300、创业板指、上证50、中证500、中证1000。
-- **常驻指数栏**：默认显示上证指数；按 `i` 配置最多 6 项，中文名称或代码用逗号分隔，Enter 保存，清空关闭。设置重启后保留，完整/简约、自选/云图页面均可展示，点击可看走势。
-- **筹码峰（估算）**：个股完整模式显示分布、估算均价、90% 成本区间和日线获利比例；简约模式显示数字摘要。此功能依赖免费日线源，可能断连；无数据时明确提示，不用模拟数据代替。指数不适用筹码分布，ETF 暂不提供筹码估算。
+支持 Windows 10/11 x64（Intel / AMD），无需 Rust、Git 或管理员权限。在 PowerShell 5.1+ 中执行：
 
-## 优化
+```powershell
+irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
+```
 
-- 价格刻度按窗口高度和波动幅度自适应；查看游标时显示对应价格和时间。
-- ETF 保留三位小数，指数单位为点；兼容恒生指数源时间格式。
-- 多项常驻时自适应排布，窄窗口显示剩余数量；云图翻页与鼠标定位同步适配。
-- 原有自选分组、模式记忆、云图排序、代理与刷新间隔设置继续可用。
+- 安装到 `%LOCALAPPDATA%\Ticktop\bin`，校验 ZIP 的 SHA-256 后安装，并自动加入用户 PATH；重复安装不会重复添加。
+- Git Bash 支持原有 `curl ... | bash` 安装命令，自动选择 Windows 原生版；MinTTY 中用 `winpty ticktop`，Windows Terminal / PowerShell 直接运行 `ticktop`。
+- Windows `ticktop update` 使用内置 PowerShell 安装器，不依赖 Bash。支持运行中替换 `.exe`，失败保留旧程序，升级保留个人设置与自选。
+- Windows 安装包使用静态 MSVC CRT，无需另外安装 Visual C++ Redistributable。暂不提供 Windows ARM64 原生包。
 
 ## 下载与更新
 
-在 Assets 中选择平台对应的 `.tar.gz`，每份压缩包均附 `.sha256` 校验文件。
-
-| 系统 | 架构 |
+| 平台 | 安装文件 |
 | --- | --- |
-| Linux | x86_64、ARM64 |
-| macOS | Intel、Apple Silicon |
+| Windows x64 | `ticktop-x86_64-pc-windows-msvc.zip` |
+| Linux x86_64 / ARM64 | 对应 `.tar.gz` |
+| macOS Intel / Apple Silicon | 对应 `.tar.gz` |
 
-一键安装：
+每份安装包均有 `.sha256` 校验文件。Windows 解压后运行 `.\ticktop.exe`；Linux / macOS 运行 `./ticktop`。
+
+Linux / macOS 一键安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.sh | bash
 ```
 
-已安装的用户运行 `ticktop update`。自选、分组、显示模式与配置保留。进入后 `/` 搜索、`a` 添加自选、`i` 配置常驻指数、`m` 切模式、`h` 看云图、`?` 查看帮助。
+已安装用户运行 `ticktop update`。其他已打开的终端需重启以刷新 PATH。
 
-免费行情可能延迟，休市显示最后可用快照；常驻栏 `*` 表示源报价超过 120 秒。筹码峰是历史日线与换手率推演的成本估算，不是实际持仓；云图面积按成分股数量分配，并非市值占比。
+保留 v0.2 的 ETF、指数、自选分组、常驻指数栏、云图与两种显示模式。`/` 搜索、`i` 设置常驻指数、`m` 切模式、`h` 看云图、`?` 帮助。
+
+免费行情可能延迟，休市显示最后快照；筹码峰是估算值，其免费日线源可能不可用。指数不适用筹码分布，ETF 暂不提供筹码估算。

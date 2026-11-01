@@ -96,3 +96,27 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" dist/* --verify-tag --title "Ticktop $TAG" --notes-file docs/RELEASE_NOTES.md
+  verify-windows:
+    needs: publish
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify public Windows installation and self-update
+        shell: powershell
+        run: |
+          $directory = Join-Path $env:RUNNER_TEMP 'Ticktop installed test'
+          & ./scripts/install.ps1 -InstallDir $directory -Version '${{ github.ref_name }}' -NoPath
+          $exe = Join-Path $directory 'ticktop.exe'
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed binary failed' }
+          & $exe update
+          if ($LASTEXITCODE -ne 0) { throw 'Native self-update failed' }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Updated binary failed' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pywinpty==3.0.4
+      - name: Verify downloaded binary in Windows ConPTY
+        shell: powershell
+        run: python scripts/windows_smoke.py (Join-Path $env:RUNNER_TEMP 'Ticktop installed test\ticktop.exe')

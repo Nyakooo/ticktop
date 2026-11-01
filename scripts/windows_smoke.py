@@ -17,7 +17,9 @@ with tempfile.TemporaryDirectory(prefix='ticktop-conpty-') as data:
         def read():
             try:
                 while True:
-                    chunks.append(process.read(65536))
+                    chunk = process.read(65536)
+                    if chunk:
+                        chunks.append(chunk)
             except (EOFError, OSError):
                 pass
         threading.Thread(target=read, daemon=True).start()

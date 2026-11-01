@@ -31,7 +31,7 @@ function Expect-Failure($Action) {
     Assert $failed 'Expected installation to fail'
 }
 try {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     Add-Type -TypeDefinition @'
 using System;
 using System.Threading;

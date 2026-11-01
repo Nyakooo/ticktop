@@ -50,7 +50,7 @@ param(
         $expected = $Matches[1]
         if ($Matches[2] -cne $asset) { throw 'Checksum filename mismatch.' }
         if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch; existing installation was not changed.' }
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
         $zip = [IO.Compression.ZipFile]::OpenRead($archive)
         try {
             if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -cne 'ticktop.exe') { throw 'Unexpected archive contents.' }

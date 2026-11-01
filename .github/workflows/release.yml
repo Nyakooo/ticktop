@@ -18,7 +18,12 @@ jobs:
             target: x86_64-apple-darwin
           - os: macos-15
             target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -36,8 +41,12 @@ jobs:
       - name: Build release
         run: |
           test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ '${{ runner.os }}' == Windows ]]; then
+            export RUSTFLAGS='-C target-feature=+crt-static'
+          fi
           cargo build --locked --release --target '${{ matrix.target }}'
-      - name: Package
+      - name: Package Unix
+        if: runner.os != 'Windows'
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -52,6 +61,20 @@ jobs:
             shasum -a 256 "ticktop-$TARGET.tar.gz" > "ticktop-$TARGET.tar.gz.sha256"
           fi
           rm ticktop
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $target = '${{ matrix.target }}'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/$target/release/ticktop.exe" dist/ticktop.exe
+          & ./dist/ticktop.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Binary smoke failed' }
+          $asset = "ticktop-$target.zip"
+          Compress-Archive -LiteralPath dist/ticktop.exe -DestinationPath "dist/$asset"
+          $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path (Resolve-Path dist) "$asset.sha256"), "$hash  $asset`n")
+          Remove-Item dist/ticktop.exe
       - uses: actions/upload-artifact@v4
         with:
           name: ticktop-${{ matrix.target }}

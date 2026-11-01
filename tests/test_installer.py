@@ -41,7 +41,7 @@ while [ "$#" -gt 0 ]; do
   *) shift ;;
  esac
 done
-cp "$FIXTURE/${url##*/}" "$out"
+if [ -n "$out" ]; then cp "$FIXTURE/${url##*/}" "$out"; else cat "$FIXTURE/${url##*/}"; fi
 ''')
         self.tool("uname", '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n')
         self.env = {**os.environ, "HOME": str(self.home), "PATH": f"{self.bin}:{os.environ['PATH']}", "SHELL": "/usr/bin/zsh", "FIXTURE": str(self.fixture)}
@@ -109,6 +109,20 @@ cp "$FIXTURE/${url##*/}" "$out"
     def test_rejects_unsupported_shell_and_version(self):
         self.install("--shell", "fish", success=False)
         self.install("--version", "../../oops", success=False)
+
+    def test_git_bash_dispatches_to_native_powershell_installer(self):
+        self.tool("uname", '#!/bin/sh\necho MINGW64_NT-10.0\n')
+        (self.fixture / "install.ps1").write_text("# native installer fixture\n")
+        self.tool("powershell.exe", '''#!/usr/bin/env bash
+set -eu
+cat > "$FIXTURE/powershell-input"
+printf '%s/%s' "$TICKTOP_VERSION" "$TICKTOP_NO_PATH" > "$FIXTURE/windows-options"
+''')
+        self.install("--version", "v0.3.0", "--no-path")
+        self.assertEqual((self.fixture / "powershell-input").read_text(), "# native installer fixture\n")
+        self.assertEqual((self.fixture / "windows-options").read_text(), "v0.3.0/1")
+        self.assertFalse((self.home / ".zshrc").exists())
+        self.assertFalse((self.home / ".local/bin/ticktop").exists())
 
     def test_rejects_archive_links(self):
         with tarfile.open(self.fixture / self.asset, "w:gz") as archive:

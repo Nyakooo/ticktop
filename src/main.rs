@@ -38,6 +38,11 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        #[cfg(windows)]
+        anyhow::bail!(
+            "请在 Windows Terminal / PowerShell 中运行；Git Bash (MinTTY) 请用 winpty ticktop。或用 --check 检查行情连接"
+        );
+        #[cfg(not(windows))]
         anyhow::bail!("请在交互终端中运行，或用 --check 检查行情连接");
     }
     let mut app = App::new(
@@ -113,6 +118,7 @@ async fn terminate_signal() {
 async fn terminate_signal() {
     std::future::pending::<()>().await;
 }
+#[cfg(not(windows))]
 fn update() -> Result<()> {
     let exe = std::env::current_exe()?;
     let target = exe.parent().context("无法确定安装目录")?;
@@ -131,6 +137,34 @@ fn update() -> Result<()> {
         .write_all(include_bytes!("../scripts/install.sh"))?;
     if !child.wait()?.success() {
         anyhow::bail!("更新失败；原程序和个人数据已保留");
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn update() -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let target = exe.parent().context("无法确定安装目录")?;
+    let mut child = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "& ([scriptblock]::Create([Console]::In.ReadToEnd())) -NoPath",
+        ])
+        .env("TICKTOP_INSTALL_DIR", target)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .context("更新需要 Windows PowerShell 5.1 或更高版本")?;
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .context("installer stdin unavailable")?
+        .write_all(include_bytes!("../scripts/install.ps1"))?;
+    if !child.wait()?.success() {
+        anyhow::bail!("更新失败；请关闭其他 Ticktop 窗口后重试，个人数据保留");
     }
     Ok(())
 }

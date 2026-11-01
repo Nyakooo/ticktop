@@ -32,6 +32,7 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
         let mut file = options.open(&temp)?;
         file.write_all(data)?;
         file.sync_all()?;
+        drop(file);
         std::fs::rename(&temp, path)?;
         Ok(())
     })();

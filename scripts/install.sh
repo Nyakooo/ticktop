@@ -18,6 +18,23 @@ while [ "$#" -gt 0 ]; do
 done
 case "$shell_choice" in ''|bash|zsh) ;; *) fail 'Supported shells: zsh, bash' ;; esac
 case "$version" in latest) ;; *) [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]] || fail 'Invalid version (use v0.1.0)' ;; esac
+# Git Bash/MSYS installs the native Windows executable via the same verified ZIP installer.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        command -v powershell.exe >/dev/null 2>&1 || fail 'Windows PowerShell is required'
+        command -v curl >/dev/null 2>&1 || fail 'curl is required'
+        if [ -n "${TICKTOP_INSTALL_DIR:-}" ] && command -v cygpath >/dev/null 2>&1; then
+            export TICKTOP_INSTALL_DIR="$(cygpath -aw -- "$TICKTOP_INSTALL_DIR")"
+        fi
+        ref=master
+        if [ "$version" != latest ]; then ref="$version"; fi
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 10 --max-time 120 \
+            "https://raw.githubusercontent.com/Nyakooo/ticktop/$ref/scripts/install.ps1" | \
+            TICKTOP_VERSION="$version" TICKTOP_NO_PATH="$((1-modify_path))" \
+            powershell.exe -NoLogo -NoProfile -NonInteractive -Command '& ([scriptblock]::Create([Console]::In.ReadToEnd()))'
+        exit $?
+        ;;
+esac
 [ -n "${HOME:-}" ] || fail 'HOME is not set'
 for tool in curl tar mktemp; do command -v "$tool" >/dev/null 2>&1 || fail "Missing dependency: $tool"; done
 if command -v sha256sum >/dev/null 2>&1; then checksum_tool=sha256sum

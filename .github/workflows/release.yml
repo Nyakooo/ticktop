@@ -116,7 +116,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install pywinpty==3.0.4
+      - run: python -m pip install pywinpty==3.0.2
       - name: Verify downloaded binary in Windows ConPTY
         shell: powershell
         run: python scripts/windows_smoke.py (Join-Path $env:RUNNER_TEMP 'Ticktop installed test\ticktop.exe')

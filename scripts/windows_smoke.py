@@ -66,6 +66,7 @@ with tempfile.TemporaryDirectory(prefix='ticktop-conpty-') as data:
         assert process.wait() == 0, ''.join(chunks)[-2000:]
         state = json.loads(Path(data, 'demo-state.json').read_text(encoding='utf-8'))
         assert state['mode'] == 'minimal' and state['heatmap'] is True
+        assert state['selected'] == 'sh510300', 'ETF preview did not select the requested fund'
     finally:
         if process.isalive():
             process.terminate(force=True)

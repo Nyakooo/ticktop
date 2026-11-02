@@ -1067,7 +1067,7 @@ fn market_amount_stays_visible_across_modes_and_views() {
             app.user.heatmap = heat;
             let rendered = screen(&app, 160, 42);
             assert!(rendered.contains("两市A股成交额 200.00亿"));
-            assert!(rendered.contains("预计暂无"));
+            assert!(!rendered.contains("预计"));
         }
     }
     app.user.heatmap = false;

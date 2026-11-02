@@ -218,7 +218,7 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         (Some(sh), Some(sz)) if sh.source_time.date_naive() == sz.source_time.date_naive() => {
             match (sh.amount_wan, sz.amount_wan) {
                 (Some(a), Some(b)) => format!(
-                    "两市A股成交额 {:.2}亿 · 预计暂无 · {} {}{}",
+                    "两市A股成交额 {:.2}亿 · {} {}{}",
                     (a + b) / 10000.,
                     sh.source_time.format("%m-%d"),
                     sh.source_time.min(sz.source_time).format("%H:%M:%S"),
@@ -228,10 +228,10 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                         ""
                     }
                 ),
-                _ => "两市A股成交额 -- · 预计暂无".into(),
+                _ => "两市A股成交额 --".into(),
             }
         }
-        _ => "两市A股成交额 -- · 预计暂无".into(),
+        _ => "两市A股成交额 --".into(),
     };
     f.render_widget(
         Paragraph::new(summary).style(Style::default().fg(p.dim)),

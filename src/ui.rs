@@ -214,6 +214,29 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         text(if app.paused { "   ||" } else { "" }, p.dim),
     ];
     f.render_widget(Paragraph::new(Line::from(spans)), r);
+    let summary = match (app.quotes.get("sh000002"), app.quotes.get("sz399107")) {
+        (Some(sh), Some(sz)) if sh.source_time.date_naive() == sz.source_time.date_naive() => {
+            match (sh.amount_wan, sz.amount_wan) {
+                (Some(a), Some(b)) => format!(
+                    "两市A股成交额 {:.2}亿 · 预计暂无 · {} {}{}",
+                    (a + b) / 10000.,
+                    sh.source_time.format("%m-%d"),
+                    sh.source_time.min(sz.source_time).format("%H:%M:%S"),
+                    if sh.age_secs() > 120 || sz.age_secs() > 120 {
+                        " · 快照"
+                    } else {
+                        ""
+                    }
+                ),
+                _ => "两市A股成交额 -- · 预计暂无".into(),
+            }
+        }
+        _ => "两市A股成交额 -- · 预计暂无".into(),
+    };
+    f.render_widget(
+        Paragraph::new(summary).style(Style::default().fg(p.dim)),
+        Rect::new(r.x, r.y + 1, r.width, 1),
+    );
     index_bar(f, app, r, p);
 }
 fn index_columns(app: &App, width: u16) -> usize {
@@ -238,11 +261,11 @@ fn index_cells(app: &App, r: Rect) -> Vec<Rect> {
         .pinned_indices
         .iter()
         .enumerate()
-        .take(r.height.saturating_sub(1) as usize * columns)
+        .take(r.height.saturating_sub(2) as usize * columns)
         .map(|(i, _)| {
             Rect::new(
                 r.x + (i % columns) as u16 * width,
-                r.y + 1 + (i / columns) as u16,
+                r.y + 2 + (i / columns) as u16,
                 width,
                 1,
             )
@@ -457,7 +480,16 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             p.change(q.percent()),
         ));
     }
-    f.render_widget(Paragraph::new(Line::from(quote)), rows[1]);
+    let metrics = q
+        .map(quote_metrics)
+        .unwrap_or_else(|| "成交量 --  换手率 --".into());
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(quote),
+            Line::styled(metrics, Style::default().fg(p.dim)),
+        ]),
+        rows[1],
+    );
     let tabs = Period::ALL
         .into_iter()
         .flat_map(|period| {
@@ -636,6 +668,37 @@ fn price_scale(
     (start..=end).step_by(step as usize).collect()
 }
 
+fn quote_metrics(q: &Quote) -> String {
+    format!(
+        "成交量 {}  换手率 {}",
+        q.volume_lots
+            .map(|v| if v >= 10000. {
+                format!("{:.2}万手", v / 10000.)
+            } else {
+                format!("{v:.0}手")
+            })
+            .unwrap_or_else(|| "--".into()),
+        q.turnover_percent
+            .map(|v| format!("{v:.2}%"))
+            .unwrap_or_else(|| "--".into())
+    )
+}
+/// Trading minutes, excluding the lunch break. Pre-open points sit at the opening edge.
+pub fn intraday_position(label: &str, hong_kong: bool) -> Option<f64> {
+    let (h, m) = label.split_once(':')?;
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    if h > 23 || m > 59 {
+        return None;
+    }
+    let time = h * 60 + m;
+    let morning_end = if hong_kong { 720 } else { 690 };
+    let close = if hong_kong { 960 } else { 900 };
+    Some(if time <= morning_end {
+        time.saturating_sub(570)
+    } else {
+        morning_end - 570 + time.min(close).saturating_sub(780)
+    } as f64)
+}
 fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let Some(s) = app.series().filter(|s| !s.points.is_empty()) else {
         f.render_widget(
@@ -656,7 +719,16 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .points
         .iter()
         .enumerate()
-        .map(|(i, p)| (i as f64, p.price.as_f64()))
+        .map(|(i, p)| {
+            (
+                if s.period == Period::Intraday {
+                    intraday_position(&p.label, s.id.starts_with("hk")).unwrap_or(0.)
+                } else {
+                    i as f64
+                },
+                p.price.as_f64(),
+            )
+        })
         .collect();
     let min = s.points.iter().map(|p| p.price).min().unwrap();
     let max = s.points.iter().map(|p| p.price).max().unwrap();
@@ -689,7 +761,11 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         areas[0],
     );
     let r = areas[1];
-    let xmax = (points.len().saturating_sub(1) as f64).max(1.);
+    let xmax = if s.period == Period::Intraday {
+        if s.id.starts_with("hk") { 330. } else { 240. }
+    } else {
+        (points.len().saturating_sub(1) as f64).max(1.)
+    };
     let color = app
         .user
         .selected
@@ -733,7 +809,17 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             .style(Style::default().fg(p.accent))
             .data(&selected_dot),
     );
-    let labels = if points.len() > 1 {
+    let labels = if s.period == Period::Intraday {
+        if s.id.starts_with("hk") {
+            vec![Span::raw("09:30"), Span::raw("13:15"), Span::raw("16:00")]
+        } else {
+            vec![
+                Span::raw("09:30"),
+                Span::raw("11:30/13:00"),
+                Span::raw("15:00"),
+            ]
+        }
+    } else if points.len() > 1 {
         vec![
             Span::raw(s.points[0].label.clone()),
             Span::raw(s.points[points.len() / 2].label.clone()),
@@ -803,6 +889,9 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     f.render_stateful_widget(table, areas[0], &mut state);
     let code = app.user.selected.clone().unwrap_or_default();
     let mut samples = vec![format!("{code} / {}", app.user.period.key())];
+    if let Some(q) = app.quotes.get(&code) {
+        samples.push(quote_metrics(q));
+    }
     if let Some(s) = app.series() {
         let n = s.points.len();
         if n > 0 {
@@ -1392,7 +1481,7 @@ fn outer_layout(area: Rect, app: &App) -> std::rc::Rc<[Rect]> {
         .constraints([
             Constraint::Length(
                 index_rows(app, area.width.saturating_sub(2))
-                    .saturating_add(1)
+                    .saturating_add(2)
                     .max(2)
                     .min(area.height.saturating_sub(13).max(2)),
             ),

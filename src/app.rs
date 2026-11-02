@@ -181,9 +181,15 @@ impl App {
         {
             symbols.push(id.clone());
         }
-        for id in &self.config.pinned_indices {
-            if !symbols.contains(id) {
-                symbols.push(id.clone());
+        for id in self
+            .config
+            .pinned_indices
+            .iter()
+            .map(String::as_str)
+            .chain(["sh000002", "sz399107"])
+        {
+            if !symbols.iter().any(|s| s == id) {
+                symbols.push(id.to_string());
             }
         }
         Request {

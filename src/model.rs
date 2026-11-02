@@ -89,6 +89,13 @@ pub struct Quote {
     pub low: Price,
     pub source_time: DateTime<FixedOffset>,
     pub received_at: DateTime<Utc>,
+    /// Mainland volume in lots (100 shares), amount in CNY ten-thousands.
+    #[serde(default)]
+    pub volume_lots: Option<f64>,
+    #[serde(default)]
+    pub amount_wan: Option<f64>,
+    #[serde(default)]
+    pub turnover_percent: Option<f64>,
 }
 impl Quote {
     pub fn change(&self) -> Price {

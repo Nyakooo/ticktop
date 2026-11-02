@@ -693,9 +693,9 @@ fn mouse_controls_cloud_pages_categories_and_numeric_mode() {
         row: y,
         modifiers: KeyModifiers::NONE,
     };
-    ui::mouse(&mut app, click(10, 5), 80, 24);
+    ui::mouse(&mut app, click(10, 6), 80, 24);
     assert_eq!(app.sector_index, app.cloud_page_size);
-    ui::mouse(&mut app, click(2, 5), 80, 24);
+    ui::mouse(&mut app, click(2, 6), 80, 24);
     assert_eq!(app.sector_index, 0);
     ui::mouse(
         &mut app,
@@ -713,14 +713,14 @@ fn mouse_controls_cloud_pages_categories_and_numeric_mode() {
     assert_eq!(app.user.mode, Mode::Minimal);
     assert!(screen(&app, 80, 24).contains("matrix"));
     app.sector_index = 0;
-    ui::mouse(&mut app, click(45, 7), 80, 24);
+    ui::mouse(&mut app, click(45, 8), 80, 24);
     assert_eq!(app.sector_index, 1);
-    ui::mouse(&mut app, click(15, 3), 80, 24);
+    ui::mouse(&mut app, click(15, 4), 80, 24);
     assert_eq!(
         app.user.sector_category,
         ticktop::sectors::Category::Concept
     );
-    ui::mouse(&mut app, click(25, 3), 80, 24);
+    ui::mouse(&mut app, click(25, 4), 80, 24);
     assert_eq!(app.user.sector_sort, ticktop::sectors::Sort::Losers);
     app.modal = Some(Modal::Help { offset: 0 });
     ui::mouse(&mut app, click(2, 22), 80, 24);
@@ -978,7 +978,7 @@ fn multi_index_headers_keep_cloud_geometry_and_mouse_targets_in_sync() {
     }
     app.user.mode = Mode::Full;
     let small = screen(&app, 46, 16);
-    assert!(small.contains("+5 项"));
+    assert!(small.contains("+6 项"));
     ui::mouse(
         &mut app,
         MouseEvent {
@@ -998,7 +998,7 @@ fn multi_index_headers_keep_cloud_geometry_and_mouse_targets_in_sync() {
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 2,
-            row: 2,
+            row: 3,
             modifiers: KeyModifiers::NONE,
         },
         160,
@@ -1006,4 +1006,74 @@ fn multi_index_headers_keep_cloud_geometry_and_mouse_targets_in_sync() {
     );
     assert_eq!(app.user.selected.as_deref(), Some("sh000001"));
     assert_eq!(app.user.watchlist, before);
+}
+
+#[test]
+fn intraday_axis_is_fixed_and_ignores_lunch_duration() {
+    use ticktop::ui::intraday_position;
+    assert_eq!(intraday_position("09:50", false), Some(20.));
+    assert_eq!(intraday_position("11:30", false), Some(120.));
+    assert_eq!(intraday_position("13:00", false), Some(120.));
+    assert_eq!(intraday_position("15:00", false), Some(240.));
+    assert_eq!(intraday_position("09:15", false), Some(0.));
+    assert_eq!(intraday_position("16:00", true), Some(330.));
+    assert_eq!(intraday_position("13:15", true), Some(165.));
+    assert_eq!(intraday_position("09:99", false), None);
+}
+#[test]
+fn mainland_volume_amount_and_turnover_are_optional_and_unit_preserving() {
+    let mut f = vec![""; 39];
+    f[1] = "平安银行";
+    f[3] = "11.69";
+    f[4] = "11.64";
+    f[5] = "11.60";
+    f[6] = "361600";
+    f[30] = "20261102095215";
+    f[33] = "11.73";
+    f[34] = "11.57";
+    f[37] = "42163";
+    f[38] = "0.19";
+    let parse = |f: &[&str]| {
+        market::parse_quotes(&format!("v_sz000001=\"{}\";", f.join("~")))
+            .unwrap()
+            .remove(0)
+    };
+    let q = parse(&f);
+    assert_eq!(q.volume_lots, Some(361600.));
+    assert_eq!(q.amount_wan, Some(42163.));
+    assert_eq!(q.turnover_percent, Some(0.19));
+    f[38] = "NaN";
+    f[37] = "-1";
+    f[6] = "";
+    let q = parse(&f);
+    assert!(q.volume_lots.is_none() && q.amount_wan.is_none() && q.turnover_percent.is_none());
+}
+
+#[test]
+fn market_amount_stays_visible_across_modes_and_views() {
+    let (_dir, mut app) = app();
+    let mut quotes = market::demo_quotes(&app.request().symbols);
+    for q in &mut quotes {
+        q.amount_wan = Some(1000000.);
+    }
+    app.on_market(MarketEvent::Quotes(quotes));
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for heat in [false, true] {
+            app.user.heatmap = heat;
+            let rendered = screen(&app, 160, 42);
+            assert!(rendered.contains("两市A股成交额 200.00亿"));
+            assert!(rendered.contains("预计暂无"));
+        }
+    }
+    app.user.heatmap = false;
+    app.user.mode = Mode::Full;
+    let id = app.user.selected.clone().unwrap();
+    let mut series = market::demo_history(&id, Period::Intraday);
+    series.points.truncate(21);
+    app.on_market(MarketEvent::Chart(series));
+    let rendered = screen(&app, 160, 42);
+    assert!(rendered.contains("15:00"));
+    assert!(rendered.contains("成交量 12.35万手"));
+    assert!(rendered.contains("换手率 1.23%"));
 }

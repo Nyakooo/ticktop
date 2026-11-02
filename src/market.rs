@@ -205,9 +205,23 @@ pub fn parse_quotes(text: &str) -> Result<Vec<Quote>> {
             low: Price::parse(fields[34])?,
             source_time: parse_cn_time(&fields[30].replace(['/', ':', ' '], ""))?,
             received_at: Utc::now(),
+            volume_lots: mainland_number(&fields, 6, id),
+            amount_wan: mainland_number(&fields, 37, id),
+            turnover_percent: mainland_number(&fields, 38, id),
         });
     }
     Ok(parsed)
+}
+// Hong Kong fields use a different schema; never interpret them as mainland lots/CNY.
+fn mainland_number(fields: &[&str], index: usize, id: &str) -> Option<f64> {
+    if id.starts_with("hk") {
+        return None;
+    }
+    fields
+        .get(index)?
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && *n >= 0.)
 }
 pub async fn history(http: &reqwest::Client, id: &str, period: Period) -> Result<Series> {
     if !valid_id(id) {
@@ -563,6 +577,9 @@ pub fn demo_quotes(ids: &[String]) -> Vec<Quote> {
                 low: Price((base as f64 * 0.982) as i64),
                 source_time: Utc::now().with_timezone(&FixedOffset::east_opt(28800).unwrap()),
                 received_at: Utc::now(),
+                volume_lots: Some(123456.),
+                amount_wan: Some(1250000.),
+                turnover_percent: Some(1.23),
             }
         })
         .collect()

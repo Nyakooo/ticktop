@@ -190,8 +190,8 @@ fn intraday_lunch_break_uses_ordered_trading_points() {
 }
 #[test]
 fn historical_daily_prices_are_not_adjusted_or_invented() {
-    let v = serde_json::json!({"code":0,"data":{"sz300750":{"day":[["2026-10-28","233.34","229.14"],["2026-10-29","226.86","229.07"]]}}});
-    let s = market::parse_history("sz300750", Period::Week, &v).unwrap();
+    let v = serde_json::json!({"code":0,"data":{"sz300750":{"day":[["2026-10-28","233.34","229.14","234.00","228.00","120000"],["2026-10-29","226.86","229.07","230.00","226.00","100000"]]}}});
+    let s = market::parse_history("sz300750", Period::Day, &v).unwrap();
     assert_eq!(s.points.len(), 2);
     assert_eq!(s.points[0].price, Price(2291400));
     assert_eq!(s.date, "2026-10-29");
@@ -229,7 +229,7 @@ fn sqlite_cache_keeps_quotes_and_series_separate() {
     cache.write("quotes", &quotes).unwrap();
     assert_eq!(cache.quotes().unwrap()[0].id, "sz300750");
     let s = market::demo_history("sz300750", Period::Week);
-    cache.write("series:sz300750:week", &s).unwrap();
+    cache.write("series:sz300750:kweek", &s).unwrap();
     assert_eq!(
         cache
             .series("sz300750", Period::Week)
@@ -237,7 +237,7 @@ fn sqlite_cache_keeps_quotes_and_series_separate() {
             .unwrap()
             .points
             .len(),
-        5
+        60
     );
     assert!(cache.series("sz300750", Period::Month).unwrap().is_none());
 }
@@ -1078,9 +1078,74 @@ fn market_amount_stays_visible_across_modes_and_views() {
     app.on_market(MarketEvent::Chart(series));
     let rendered = screen(&app, 160, 42);
     assert!(rendered.contains("15:00"));
-    assert!(rendered.contains("成交量 12.35万手"));
+    assert!(rendered.contains("成交量 分时"));
     assert!(rendered.contains("换手率 1.23%"));
-    assert!(rendered.contains("量比 1.56  换手率 1.23%  成交量 12.35万手"));
+    assert!(rendered.contains("量比 1.56  换手率 1.23%"));
     app.user.mode = Mode::Minimal;
-    assert!(screen(&app, 160, 42).contains("量比 1.56  换手率 1.23%  成交量 12.35万手"));
+    assert!(screen(&app, 160, 42).contains("量比 1.56  换手率 1.23%"));
+}
+
+#[test]
+fn minute_volumes_are_differences_not_cumulative_and_resets_are_missing() {
+    let v = serde_json::json!({"code":0,"data":{"sz300750":{"data":{"date":"20261102","data":["0930 20.00 100","0931 20.10 160","0932 20.05 160","0933 20.00 10","0934 20.00 30","0935 20.00 NaN","0936 20.00 90"]}}}});
+    let s = market::parse_history("sz300750", Period::Intraday, &v).unwrap();
+    assert_eq!(
+        s.points.iter().map(|p| p.volume).collect::<Vec<_>>(),
+        vec![Some(100.), Some(60.), Some(0.), None, Some(20.), None, None]
+    );
+    assert!(s.points.iter().all(|p| p.ohlc.is_none()));
+}
+#[test]
+fn candle_periods_parse_ohlc_and_own_volume_without_crossing_caches() {
+    for period in [Period::Day, Period::Week, Period::Month] {
+        let mut v = serde_json::json!({"code":0,"data":{"sz300750":{}}});
+        v["data"]["sz300750"][period.source_key()] =
+            serde_json::json!([["2026-11-02", "20.00", "21.00", "22.00", "19.00", "120000"]]);
+        let s = market::parse_history("sz300750", period, &v).unwrap();
+        let c = s.points[0].ohlc.as_ref().unwrap();
+        assert_eq!(
+            (c.open, c.high, c.low, s.points[0].price),
+            (Price(200000), Price(220000), Price(190000), Price(210000))
+        );
+        assert_eq!(s.points[0].volume, Some(120000.));
+        v["data"]["sz300750"][period.source_key()][0][3] = serde_json::json!("20.50");
+        assert!(market::parse_history("sz300750", period, &v).is_err());
+    }
+    let mut p = Period::Intraday;
+    for expected in [Period::Day, Period::Week, Period::Month, Period::Intraday] {
+        p = p.next(false);
+        assert_eq!(p, expected);
+    }
+    assert_eq!(p.next(true), Period::Month);
+    assert_ne!(Period::Intraday.key(), Period::Day.key());
+    let old: ticktop::model::Point =
+        serde_json::from_str(r#"{"label":"09:30","price":200000}"#).unwrap();
+    assert!(old.volume.is_none() && old.ohlc.is_none());
+}
+#[test]
+fn daily_candles_and_volume_render_and_cursor_pans_to_older_dates() {
+    let (_dir, mut app) = app();
+    app.user.period = Period::Day;
+    let id = app.user.selected.clone().unwrap();
+    let mut series = market::demo_history(&id, Period::Day);
+    series.points[0].label = "2020-01-02".into();
+    app.on_market(MarketEvent::Chart(series));
+    app.on_market(MarketEvent::Quotes(market::demo_quotes(
+        &app.request().symbols,
+    )));
+    for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {
+        let _ = screen(&app, w, h);
+    }
+    let rendered = screen(&app, 160, 42);
+    assert!(rendered.contains("日 K") && rendered.contains("周 K") && rendered.contains("月 K"));
+    assert!(rendered.contains("成交量 日 K"));
+    assert!(!rendered.contains("2020-01-02"));
+    app.key(key(KeyCode::Home));
+    assert!(screen(&app, 160, 42).contains("2020-01-02"));
+    app.user.mode = Mode::Minimal;
+    let rendered = screen(&app, 160, 42);
+    assert!(rendered.contains("2020-01-02") && rendered.contains("成交量"));
+    app.persist().unwrap();
+    let state = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
+    assert_eq!(state.period, Period::Day);
 }

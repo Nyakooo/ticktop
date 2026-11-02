@@ -238,10 +238,7 @@ pub async fn history(http: &reqwest::Client, id: &str, period: Period) -> Result
             .await?
     } else {
         // Unadjusted prices: history and current quotes share the same currency/scale.
-        let param = format!(
-            "{id},day,,,{},",
-            if period == Period::Week { 5 } else { 22 }
-        );
+        let param = format!("{id},{},,,60,", period.source_key());
         http.get("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get")
             .query(&[("param", param)])
             .send()
@@ -261,6 +258,7 @@ pub fn parse_history(id: &str, period: Period, value: &Value) -> Result<Series> 
     let date;
     if period == Period::Intraday {
         date = node["data"]["date"].as_str().unwrap_or("").to_string();
+        let mut previous_volume = Some(0.);
         for item in node["data"]["data"]
             .as_array()
             .context("missing minute points")?
@@ -275,26 +273,50 @@ pub fn parse_history(id: &str, period: Period, value: &Value) -> Result<Series> 
             }
             let price = Price::parse(f[1])?;
             if price.0 > 0 {
+                let cumulative = f
+                    .get(2)
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .filter(|v| v.is_finite() && *v >= 0.);
+                let volume = cumulative
+                    .zip(previous_volume)
+                    .and_then(|(now, old)| (now >= old).then_some(now - old));
+                previous_volume = cumulative;
                 points.push(Point {
                     label: format!("{}:{}", &f[0][..2], &f[0][2..]),
                     price,
+                    ohlc: None,
+                    volume,
                 });
             }
         }
     } else {
-        let rows = node["day"].as_array().context("missing daily points")?;
+        let rows = node[period.source_key()]
+            .as_array()
+            .context("missing candle points")?;
         for row in rows {
             let date = row[0].as_str().context("missing day")?;
             let price = Price::parse(row[2].as_str().context("missing close")?)?;
             if price.0 > 0 {
+                let open = Price::parse(row[1].as_str().context("missing open")?)?;
+                let high = Price::parse(row[3].as_str().context("missing high")?)?;
+                let low = Price::parse(row[4].as_str().context("missing low")?)?;
+                if low.0 <= 0 || low > open.min(price) || high < open.max(price) {
+                    bail!("invalid candle range");
+                }
+                let volume = row[5]
+                    .as_str()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .filter(|v| v.is_finite() && *v >= 0.);
                 points.push(Point {
                     label: date.into(),
                     price,
+                    ohlc: Some(Ohlc { open, high, low }),
+                    volume,
                 });
             }
         }
         date = points.last().map(|p| p.label.clone()).unwrap_or_default();
-        let keep = if period == Period::Week { 5 } else { 22 };
+        let keep = 60;
         if points.len() > keep {
             points.drain(..points.len() - keep);
         }
@@ -590,13 +612,7 @@ pub fn demo_history(id: &str, period: Period) -> Series {
     let quote = demo_quotes(&[id.into()]).remove(0);
     let base = quote.price.as_f64();
     let previous = quote.previous_close.as_f64();
-    let n = if period == Period::Intraday {
-        242
-    } else if period == Period::Week {
-        5
-    } else {
-        22
-    };
+    let n = if period == Period::Intraday { 242 } else { 60 };
     let points = (0..n)
         .map(|i| {
             let t = i as f64 / (n - 1) as f64;
@@ -610,10 +626,30 @@ pub fn demo_history(id: &str, period: Period) -> Series {
                     let minutes = if i <= 120 { 570 + i } else { 780 + i - 121 };
                     format!("{:02}:{:02}", minutes / 60, minutes % 60)
                 } else {
-                    let day = Utc::now().date_naive() - chrono::Duration::days((n - 1 - i) as i64);
+                    let day = Utc::now().date_naive()
+                        - chrono::Duration::days(
+                            (n - 1 - i) as i64
+                                * match period {
+                                    Period::Week => 7,
+                                    Period::Month => 30,
+                                    _ => 1,
+                                },
+                        );
                     format!("{:02}-{:02}", day.month(), day.day())
                 },
                 price: Price((value * 10000.) as i64),
+                ohlc: (period != Period::Intraday).then(|| {
+                    let open = value + base * (t * 70.).sin() * 0.004;
+                    Ohlc {
+                        open: Price((open * 10000.) as i64),
+                        high: Price(((open.max(value) + base * 0.003) * 10000.) as i64),
+                        low: Price(((open.min(value) - base * 0.003) * 10000.) as i64),
+                    }
+                }),
+                volume: Some(
+                    (1000. + (t * 51.).sin().abs() * 5000.)
+                        * if period == Period::Intraday { 1. } else { 100. },
+                ),
             }
         })
         .collect();

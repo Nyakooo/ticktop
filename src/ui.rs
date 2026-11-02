@@ -482,7 +482,7 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     }
     let metrics = q
         .map(quote_metrics)
-        .unwrap_or_else(|| "量比 --  换手率 --  成交量 --".into());
+        .unwrap_or_else(|| "量比 --  换手率 --".into());
     f.render_widget(
         Paragraph::new(vec![
             Line::from(quote),
@@ -513,7 +513,10 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         })
         .collect::<Vec<_>>();
     f.render_widget(Paragraph::new(Line::from(tabs)), rows[2]);
-    if crate::instruments::is_index(id) || crate::instruments::is_etf(id) {
+    if crate::instruments::is_index(id)
+        || crate::instruments::is_etf(id)
+        || (app.user.period != Period::Intraday && rows[3].width < 100)
+    {
         price_chart(f, app, rows[3], p);
     } else if rows[3].width >= 66 {
         let panes = Layout::horizontal([Constraint::Min(30), Constraint::Length(31)])
@@ -542,7 +545,7 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 if app.user.period == Period::Intraday {
                     "分时价格"
                 } else {
-                    "日收盘价 · 不复权"
+                    "OHLC · 不复权"
                 },
                 s.points.len()
             )
@@ -670,21 +673,26 @@ fn price_scale(
 
 fn quote_metrics(q: &Quote) -> String {
     format!(
-        "量比 {}  换手率 {}  成交量 {}",
+        "量比 {}  换手率 {}",
         q.volume_ratio
             .map(|v| format!("{v:.2}"))
             .unwrap_or_else(|| "--".into()),
         q.turnover_percent
             .map(|v| format!("{v:.2}%"))
-            .unwrap_or_else(|| "--".into()),
-        q.volume_lots
-            .map(|v| if v >= 10000. {
-                format!("{:.2}万手", v / 10000.)
-            } else {
-                format!("{v:.0}手")
-            })
             .unwrap_or_else(|| "--".into())
     )
+}
+fn volume_text(volume: Option<f64>, id: &str) -> String {
+    let unit = Period::volume_unit(id);
+    volume
+        .map(|v| {
+            if v >= 10000. {
+                format!("{:.2}万{unit}", v / 10000.)
+            } else {
+                format!("{v:.0}{unit}")
+            }
+        })
+        .unwrap_or_else(|| "--".into())
 }
 /// Trading minutes, excluding the lunch break. Pre-open points sit at the opening edge.
 pub fn intraday_position(label: &str, hong_kong: bool) -> Option<f64> {
@@ -703,7 +711,7 @@ pub fn intraday_position(label: &str, hong_kong: bool) -> Option<f64> {
     } as f64)
 }
 fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
-    let Some(s) = app.series().filter(|s| !s.points.is_empty()) else {
+    let Some(full_series) = app.series().filter(|s| !s.points.is_empty()) else {
         f.render_widget(
             Paragraph::new(if app.chart_error.is_some() {
                 "暂无走势 · 数据请求失败"
@@ -718,6 +726,28 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     if r.width < 18 || r.height < 4 {
         return;
     }
+    let mut viewport;
+    let mut start = 0;
+    let s = if full_series.period != Period::Intraday {
+        let count = (r.width.saturating_sub(14) as usize / 2)
+            .max(1)
+            .min(full_series.points.len());
+        let last = app
+            .chart_cursor
+            .unwrap_or(full_series.points.len() - 1)
+            .min(full_series.points.len() - 1);
+        let end = if last < full_series.points.len().saturating_sub(count) {
+            (last + count).min(full_series.points.len())
+        } else {
+            full_series.points.len()
+        };
+        start = end - count;
+        viewport = full_series.clone();
+        viewport.points = full_series.points[start..end].to_vec();
+        &viewport
+    } else {
+        full_series
+    };
     let points: Vec<_> = s
         .points
         .iter()
@@ -733,8 +763,18 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             )
         })
         .collect();
-    let min = s.points.iter().map(|p| p.price).min().unwrap();
-    let max = s.points.iter().map(|p| p.price).max().unwrap();
+    let min = s
+        .points
+        .iter()
+        .map(|pt| pt.ohlc.as_ref().map_or(pt.price, |c| c.low))
+        .min()
+        .unwrap();
+    let max = s
+        .points
+        .iter()
+        .map(|pt| pt.ohlc.as_ref().map_or(pt.price, |c| c.high))
+        .max()
+        .unwrap();
     let decimals = crate::instruments::decimals(&s.id);
     let scale = if decimals == 3 { 1000. } else { 100. };
     let ticks = price_scale(min, max, r.height.saturating_sub(1), decimals);
@@ -744,10 +784,11 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     ];
     let selected = app
         .chart_cursor
+        .map(|i| i.saturating_sub(start))
         .unwrap_or(points.len() - 1)
         .min(points.len() - 1);
     let selected_point = &s.points[selected];
-    let caption = format!(
+    let mut caption = format!(
         "{} {} {}  {}",
         if app.chart_cursor.is_some() {
             "查看"
@@ -758,16 +799,43 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         crate::instruments::unit(&s.id),
         selected_point.label
     );
-    let areas = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).split(r);
+    if let Some(c) = &selected_point.ohlc {
+        caption = format!(
+            "{} 开{} 高{} 低{} 收{}",
+            selected_point.label,
+            crate::instruments::price(&s.id, c.open),
+            crate::instruments::price(&s.id, c.high),
+            crate::instruments::price(&s.id, c.low),
+            crate::instruments::price(&s.id, selected_point.price)
+        );
+    }
+    let volume_height = if r.height >= 11 {
+        (r.height / 3).clamp(6, 8)
+    } else if r.height >= 8 {
+        3
+    } else {
+        0
+    };
+    let areas = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(3),
+        Constraint::Length(volume_height),
+    ])
+    .split(r);
     f.render_widget(
         Paragraph::new(caption).style(Style::default().fg(p.fg)),
         areas[0],
     );
     let r = areas[1];
+    let xmin = if s.period == Period::Intraday {
+        0.
+    } else {
+        -0.5
+    };
     let xmax = if s.period == Period::Intraday {
         if s.id.starts_with("hk") { 330. } else { 240. }
     } else {
-        (points.len().saturating_sub(1) as f64).max(1.)
+        (points.len() as f64 - 0.5).max(0.5)
     };
     let color = app
         .user
@@ -776,15 +844,52 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .and_then(|id| app.quotes.get(id))
         .map(|q| p.change(q.percent()))
         .unwrap_or(p.accent);
-    let mut datasets = vec![
-        Dataset::default()
-            .name("")
-            .marker(Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Style::default().fg(color))
-            .data(&points),
-    ];
-    let price_guide = [(0., points[selected].1), (xmax, points[selected].1)];
+    // Bodies and wicks use true OHLC; close-only cached points never masquerade as candles.
+    let candles: Vec<_> = s
+        .points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, pt)| {
+            pt.ohlc.as_ref().map(|c| {
+                let x = i as f64;
+                let body_low = c.open.min(pt.price).as_f64();
+                let body_high = c.open.max(pt.price).as_f64();
+                (
+                    vec![(x, c.low.as_f64()), (x, c.high.as_f64())],
+                    vec![(x, body_low), (x, body_high)],
+                    p.change((pt.price.0 - c.open.0) as f64),
+                )
+            })
+        })
+        .collect();
+    let mut datasets = Vec::new();
+    if s.period == Period::Intraday {
+        datasets.push(
+            Dataset::default()
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(color))
+                .data(&points),
+        );
+    } else {
+        for (wick, body, color) in &candles {
+            datasets.push(
+                Dataset::default()
+                    .marker(Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(*color))
+                    .data(wick),
+            );
+            datasets.push(
+                Dataset::default()
+                    .marker(Marker::HalfBlock)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(*color))
+                    .data(body),
+            );
+        }
+    }
+    let price_guide = [(xmin, points[selected].1), (xmax, points[selected].1)];
     let selected_dot = [points[selected]];
     datasets.push(
         Dataset::default()
@@ -795,7 +900,7 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     );
     let guide;
     if let Some(i) = app.chart_cursor {
-        let pt = points[i.min(points.len() - 1)];
+        let pt = points[i.saturating_sub(start).min(points.len() - 1)];
         guide = vec![(pt.0, bounds[0]), (pt.0, bounds[1])];
 
         datasets.push(
@@ -835,15 +940,24 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .into_iter()
         .map(|cents| {
             Span::styled(
-                format!("{:.*}", decimals, cents as f64 / scale),
+                format!("{:>9}", format!("{:.*}", decimals, cents as f64 / scale)),
                 Style::default().fg(p.dim),
             )
         })
         .collect::<Vec<_>>();
+    let volume_labels = labels.clone();
+    let labels = if volume_height > 0 {
+        labels
+            .into_iter()
+            .map(|label| label.style(Style::default().fg(p.bg)))
+            .collect()
+    } else {
+        labels
+    };
     let chart = Chart::new(datasets)
         .x_axis(
             Axis::default()
-                .bounds([0., xmax])
+                .bounds([xmin, xmax])
                 .labels(labels)
                 .style(Style::default().fg(p.line)),
         )
@@ -855,6 +969,150 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         )
         .hidden_legend_constraints((Constraint::Length(0), Constraint::Length(0)));
     f.render_widget(chart, r);
+    if volume_height > 0 {
+        volume_chart(
+            f,
+            app,
+            s,
+            &points,
+            [xmin, xmax],
+            volume_labels,
+            selected,
+            areas[2],
+            p,
+        );
+    }
+}
+
+// Dense minute samples sharing a terminal column are summed, never drawn on top of each other.
+#[allow(clippy::too_many_arguments)]
+fn volume_chart(
+    f: &mut Frame,
+    app: &App,
+    s: &crate::model::Series,
+    points: &[(f64, f64)],
+    bounds: [f64; 2],
+    labels: Vec<Span<'static>>,
+    selected: usize,
+    r: Rect,
+    p: Palette,
+) {
+    let pt = &s.points[selected];
+    let mut caption = format!(
+        "成交量 {}（{}） · {} {}",
+        if s.period == Period::Intraday {
+            "分时"
+        } else {
+            s.period.label()
+        },
+        Period::volume_unit(&s.id),
+        pt.label,
+        volume_text(pt.volume, &s.id)
+    );
+    if s.period == Period::Intraday {
+        let total = app.quotes.get(&s.id).and_then(|q| q.volume_lots);
+        caption = format!(
+            "成交量 分时（{}） {} · 今日{}",
+            Period::volume_unit(&s.id),
+            volume_text(pt.volume, &s.id),
+            volume_text(total, &s.id)
+        );
+    }
+    let areas = Layout::vertical([Constraint::Length(1), Constraint::Min(2)]).split(r);
+    f.render_widget(
+        Paragraph::new(caption).style(Style::default().fg(p.dim)),
+        areas[0],
+    );
+    let cols = areas[1].width.saturating_sub(14).max(1) as usize;
+    let mut bins = vec![(0., None, 0.); cols];
+    for (i, pt) in s.points.iter().enumerate() {
+        let bin = (((points[i].0 - bounds[0]) / (bounds[1] - bounds[0]) * cols as f64) as usize)
+            .min(cols - 1);
+        let b = &mut bins[bin];
+        if let Some(v) = pt.volume {
+            b.0 += v;
+            b.1 = Some(v);
+        }
+        b.2 = pt.ohlc.as_ref().map_or_else(
+            || {
+                if i > 0 {
+                    pt.price.0 - s.points[i - 1].price.0
+                } else {
+                    0
+                }
+            },
+            |c| pt.price.0 - c.open.0,
+        ) as f64;
+    }
+    let max = bins
+        .iter()
+        .filter(|b| b.1.is_some())
+        .map(|b| b.0)
+        .fold(0., f64::max)
+        .max(1.);
+    let bars: Vec<_> = bins
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.1.is_some())
+        .map(|(i, b)| {
+            let x = bounds[0] + (i as f64 + 0.5) / cols as f64 * (bounds[1] - bounds[0]);
+            ([(x, 0.), (x, b.0)], p.change(b.2))
+        })
+        .collect();
+    let mut datasets: Vec<_> = bars
+        .iter()
+        .map(|(bar, color)| {
+            Dataset::default()
+                .marker(Marker::HalfBlock)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(*color))
+                .data(bar)
+        })
+        .collect();
+    let guide = [(points[selected].0, 0.), (points[selected].0, max)];
+    if app.chart_cursor.is_some() {
+        datasets.push(
+            Dataset::default()
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(p.dim))
+                .data(&guide),
+        );
+    }
+    if bars.is_empty() {
+        f.render_widget(
+            Paragraph::new("成交量暂无数据").style(Style::default().fg(p.dim)),
+            areas[1],
+        );
+        return;
+    }
+    f.render_widget(
+        Chart::new(datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds(bounds)
+                    .labels(labels)
+                    .style(Style::default().fg(p.line)),
+            )
+            .y_axis(
+                Axis::default()
+                    .bounds([0., max])
+                    .labels([
+                        format!("{:>9}", "0"),
+                        format!(
+                            "{:>9}",
+                            if max >= 1_000_000. {
+                                format!("{:.1}e6", max / 1_000_000.)
+                            } else {
+                                format!("{max:.0}")
+                            }
+                        ),
+                    ])
+                    .style(Style::default().fg(p.line)),
+            )
+            .hidden_legend_constraints((Constraint::Length(0), Constraint::Length(0))),
+        areas[1],
+    );
 }
 fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let areas = Layout::vertical([Constraint::Min(4), Constraint::Length(5)]).split(r);
@@ -896,6 +1154,17 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         samples.push(quote_metrics(q));
     }
     if let Some(s) = app.series() {
+        if let Some(pt) = s
+            .points
+            .get(app.chart_cursor.unwrap_or(s.points.len().saturating_sub(1)))
+        {
+            samples.push(format!(
+                "\n{}  价 {}  成交量 {}",
+                pt.label,
+                crate::instruments::price(&s.id, pt.price),
+                volume_text(pt.volume, &s.id)
+            ));
+        }
         let n = s.points.len();
         if n > 0 {
             let count = ((r.width as usize).saturating_sub(14) / 12)

@@ -15,10 +15,11 @@ fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&out)?;
     // Optional second argument renders an existing live cache without fetching data
     // or overwriting the user's mode and view preferences.
+    let daily_preview = std::env::args().any(|s| s == "--daily");
     let indices_preview = std::env::args().any(|s| s == "--indices");
     let live_data = std::env::args()
         .nth(2)
-        .filter(|s| s != "--indices")
+        .filter(|s| s != "--indices" && s != "--daily")
         .map(std::path::PathBuf::from);
     let demo = live_data.is_none();
     let data = live_data.unwrap_or_else(|| out.join("data"));
@@ -31,6 +32,9 @@ fn main() -> anyhow::Result<()> {
             .collect();
         app.user.add("sh510300", 0)?;
         app.user.selected = Some("sh510300".into());
+    }
+    if daily_preview {
+        app.user.period = ticktop::model::Period::Day;
     }
     if demo {
         app.on_market(MarketEvent::Quotes(market::demo_quotes(

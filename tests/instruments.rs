@@ -115,7 +115,7 @@ async fn live_indices_and_etf_quotes_and_history() {
     let quotes = market::quotes(&http, &ids).await.unwrap();
     assert!(ids.iter().all(|id| quotes.iter().any(|q| &q.id == id)));
     for id in ["hkHSI", "sh510300", "sh000001"] {
-        for period in [Period::Intraday, Period::Week] {
+        for period in Period::ALL {
             let series = market::history(&http, id, period).await.unwrap();
             assert!(!series.points.is_empty());
             println!(

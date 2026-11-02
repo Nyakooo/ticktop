@@ -122,27 +122,40 @@ impl Quote {
 pub enum Period {
     #[default]
     Intraday,
+    Day,
     Week,
     Month,
 }
 impl Period {
-    pub const ALL: [Self; 3] = [Self::Intraday, Self::Week, Self::Month];
+    pub const ALL: [Self; 4] = [Self::Intraday, Self::Day, Self::Week, Self::Month];
     pub fn next(self, reverse: bool) -> Self {
         let i = Self::ALL.iter().position(|x| *x == self).unwrap_or(0);
-        Self::ALL[(i + if reverse { 2 } else { 1 }) % 3]
+        Self::ALL[(i + if reverse { Self::ALL.len() - 1 } else { 1 }) % Self::ALL.len()]
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Intraday => "日内",
-            Self::Week => "1周",
-            Self::Month => "1月",
+            Self::Intraday => "分时",
+            Self::Day => "日 K",
+            Self::Week => "周 K",
+            Self::Month => "月 K",
         }
+    }
+    pub fn source_key(self) -> &'static str {
+        match self {
+            Self::Intraday | Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+        }
+    }
+    pub fn volume_unit(id: &str) -> &'static str {
+        if id.starts_with("hk") { "股" } else { "手" }
     }
     pub fn key(self) -> &'static str {
         match self {
             Self::Intraday => "day",
-            Self::Week => "week",
-            Self::Month => "month",
+            Self::Day => "kday",
+            Self::Week => "kweek",
+            Self::Month => "kmonth",
         }
     }
 }
@@ -150,6 +163,17 @@ impl Period {
 pub struct Point {
     pub label: String,
     pub price: Price,
+    #[serde(default)]
+    pub ohlc: Option<Ohlc>,
+    /// Per-interval volume, mainland lots / Hong Kong shares; never cumulative.
+    #[serde(default)]
+    pub volume: Option<f64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ohlc {
+    pub open: Price,
+    pub high: Price,
+    pub low: Price,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Series {

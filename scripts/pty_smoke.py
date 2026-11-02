@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output[start:].decode(errors="replace"))
-                if re.search("量比.*?换手率.*?成交量", plain):
+                if re.search(r"量比[\s\S]*?换手率[\s\S]*?成交量", plain):
                     return
                 drain(0.1)
             raise AssertionError("metric order must be volume ratio, turnover, volume")
@@ -59,6 +59,22 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         send("m")
         check_metric_order(minimal_start)
         send("m")
+        send("\x1b[C")  # intraday -> daily candles
+        # Force a full repaint: an incremental update may omit the unchanged volume label.
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 37, 132, 0, 0))
+        os.kill(pid, signal.SIGWINCH)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
+            if "成交量 日 K" in plain: break
+            drain(0.1)
+        assert "成交量 日 K" in plain, "daily candle volume panel missing"
+        send("\x1b[H")  # pan to oldest candle
+        send("\x1b[F")  # latest candle
+        send("\x1b[D")  # back to intraday
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 130, 0, 0))
+        os.kill(pid, signal.SIGWINCH)
+        drain()
         send("a")
         send("宁德")
         send("\r")  # choose instrument

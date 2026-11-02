@@ -135,3 +135,10 @@ Release review: Standards axis found one terminal-lifecycle cleanup issue; fixed
 - pywinpty 3.0.2 的 Windows 终端实测：中文搜索并添加平安银行（按保存的代码确认）、ETF 预览、常驻设置、模式与云图、缩放、退出与重启恢复。测试依赖仅在 CI 使用，产品无 Python 依赖。
 - Linux 格式检查、Clippy、62 项 Rust 测试、PTY 操作、模式重启及 9 项 Bash 安装器测试通过；Git Bash 分发入口使用本地运输桩检查，确认委托 PowerShell 且不改 Unix rc 文件。
 - 发布矩阵新增 x86_64-pc-windows-msvc ZIP + SHA-256，使用静态 CRT；发布后 Windows job 对公开脚本安装、自更新和下载版 ConPTY 再次验证。
+
+## v0.3.1 发布验证（2026-11-02）
+
+- Rust 测试：65 通过，4 项联网检查按需忽略；Clippy、rustfmt、9 项安装器回归检查通过。
+- 两市成交额同日汇总、完整/简约/云图常驻、量比字段及无效值处理、固定全天时间轴均通过回归验证。
+- 完整与简约渲染结果断言连续显示“量比 1.56  换手率 1.23%  成交量 12.35万手”，避免只校验字段存在而漏掉顺序错误。
+- 重新构建的本地 release 二进制报告 0.3.1，通过两种模式指标顺序的真实 PTY 检查，以及搜索、指数、分组、云图、模式持久化等交互验证。终端测试等待设置实际保存后再断言，避免编译高负载下的固定时延误判。

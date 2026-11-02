@@ -1,38 +1,30 @@
-# Ticktop v0.3.0
+# Ticktop v0.3.1
 
-新增 Windows 原生支持。终端行情看板，只看盘，不交易。
+补充看盘信息，优化日内走势时间轴。
 
-## Windows 安装
+## 更新内容
 
-支持 Windows 10/11 x64（Intel / AMD），无需 Rust、Git 或管理员权限。在 PowerShell 5.1+ 中执行：
+- 顶部常驻两市 A 股成交额，完整、简约及云图模式均可见。汇总沪市 A 股与深市 A 股全市场口径（不含北交所、B 股），显示行情源时间；过期行情标注“快照”。暂无可靠免费全天预测数据时显示“预计暂无”。
+- 个股详情增加量比、换手率、成交量，按此顺序排列。两种模式均支持，缺失字段显示 `--`。
+- A 股日内分时图固定展示 09:30—15:00，午休压缩为 11:30/13:00；盘中未发生的时段留空。恒生指数固定展示至 16:00，周/月视图保持不变。
+- 同步调整新增常驻行后的鼠标点击位置与窄窗口布局。
 
-```powershell
-irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
-```
+## 安装与更新
 
-- 安装到 `%LOCALAPPDATA%\Ticktop\bin`，校验 ZIP 的 SHA-256 后安装，并自动加入用户 PATH；重复安装不会重复添加。
-- Git Bash 支持原有 `curl ... | bash` 安装命令，自动选择 Windows 原生版；MinTTY 中用 `winpty ticktop`，Windows Terminal / PowerShell 直接运行 `ticktop`。
-- Windows `ticktop update` 使用内置 PowerShell 安装器，不依赖 Bash。支持运行中替换 `.exe`，失败保留旧程序，升级保留个人设置与自选。
-- Windows 安装包使用静态 MSVC CRT，无需另外安装 Visual C++ Redistributable。暂不提供 Windows ARM64 原生包。
-
-## 下载与更新
-
-| 平台 | 安装文件 |
-| --- | --- |
-| Windows x64 | `ticktop-x86_64-pc-windows-msvc.zip` |
-| Linux x86_64 / ARM64 | 对应 `.tar.gz` |
-| macOS Intel / Apple Silicon | 对应 `.tar.gz` |
-
-每份安装包均有 `.sha256` 校验文件。Windows 解压后运行 `.\ticktop.exe`；Linux / macOS 运行 `./ticktop`。
-
-Linux / macOS 一键安装：
+Linux / macOS / Git Bash：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.sh | bash
 ```
 
-已安装用户运行 `ticktop update`。其他已打开的终端需重启以刷新 PATH。
+Windows 10/11 x64（PowerShell 5.1+）：
 
-保留 v0.2 的 ETF、指数、自选分组、常驻指数栏、云图与两种显示模式。`/` 搜索、`i` 设置常驻指数、`m` 切模式、`h` 看云图、`?` 帮助。
+```powershell
+irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
+```
 
-免费行情可能延迟，休市显示最后快照；筹码峰是估算值，其免费日线源可能不可用。指数不适用筹码分布，ETF 暂不提供筹码估算。
+已安装用户运行 `ticktop update`，退出旧程序后重新启动。更新保留自选、分组与个人设置。
+
+提供 Windows x64、Linux x86_64 / ARM64、macOS Intel / Apple Silicon 安装包及各自的 SHA-256 校验文件。
+
+免费行情可能延迟，休市显示最后快照；筹码峰为估算，其免费日线源可能不可用。

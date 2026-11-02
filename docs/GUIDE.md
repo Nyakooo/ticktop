@@ -237,7 +237,7 @@ Git Bash 也支持 README 中的 `curl ... | bash` 命令，自动调用 Windows
 
 ```powershell
 $env:TICKTOP_INSTALL_DIR = 'C:\Tools\Ticktop'
-$env:TICKTOP_VERSION = 'v0.3.0'
+$env:TICKTOP_VERSION = 'v0.3.1'
 irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
 ```
 
@@ -247,6 +247,6 @@ irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1
 
 顶部常驻显示两市 A 股成交额（沪市 A 股指数 sh000002 + 深证 A 指 sz399107 的成交额，单位亿元，不含北交所、B 股）。仅汇总同一交易日的两份有效报价，并标注两者中较早的源时间；过期行情显示“快照”。免费行情源暂无可验证的全天成交额预测，显示“预计暂无”，不以简单线性外推冒充预测。
 
-个股详情在完整与简约模式中均显示成交量（手/万手，1 手为 100 股）、换手率（%）和量比（无单位）；源字段缺失时显示 `--`。港股字段采用不同口径，暂不套用 A 股单位。
+个股详情在完整与简约模式中均按量比（无单位）、换手率（%）、成交量（手/万手，1 手为 100 股）的顺序显示；源字段缺失时显示 `--`。港股字段采用不同口径，暂不套用 A 股单位。
 
 日内分时图固定显示 09:30 至 15:00，午休压缩为 11:30/13:00，盘中尚未发生的时段留空；港股指数固定到 16:00。周/月视图仍按已有交易日显示。本图为价格分时走势，非 OHLC 蜡烛图。

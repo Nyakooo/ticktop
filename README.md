@@ -18,11 +18,11 @@
 
 | 系统 | 芯片架构 | 下载 | 校验 |
 | --- | --- | --- | --- |
-| Windows | x86_64 / AMD64 | [下载 ZIP](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-pc-windows-msvc.zip) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-pc-windows-msvc.zip.sha256) |
-| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
-| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
-| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
-| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.0/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
+| Windows | x86_64 / AMD64 | [下载 ZIP](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-x86_64-pc-windows-msvc.zip) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-x86_64-pc-windows-msvc.zip.sha256) |
+| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
+| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
+| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
+| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.3.1/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
 
 Windows 解压后在 Windows Terminal / PowerShell 中运行 `.\ticktop.exe`；Linux / macOS 运行 `./ticktop`。
 

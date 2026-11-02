@@ -1080,7 +1080,7 @@ fn market_amount_stays_visible_across_modes_and_views() {
     assert!(rendered.contains("15:00"));
     assert!(rendered.contains("成交量 12.35万手"));
     assert!(rendered.contains("换手率 1.23%"));
-    assert!(rendered.contains("量比 1.56"));
+    assert!(rendered.contains("量比 1.56  换手率 1.23%  成交量 12.35万手"));
     app.user.mode = Mode::Minimal;
-    assert!(screen(&app, 160, 42).contains("量比 1.56"));
+    assert!(screen(&app, 160, 42).contains("量比 1.56  换手率 1.23%  成交量 12.35万手"));
 }

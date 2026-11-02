@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import struct
@@ -44,6 +45,20 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         while "ticktop_" not in output.decode(errors="replace") and time.monotonic() < startup_deadline:
             drain(0.1)
         assert "ticktop_" in output.decode(errors="replace"), "initial render missing"
+        def check_metric_order(start=0):
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output[start:].decode(errors="replace"))
+                if re.search("量比.*?换手率.*?成交量", plain):
+                    return
+                drain(0.1)
+            raise AssertionError("metric order must be volume ratio, turnover, volume")
+
+        check_metric_order()
+        minimal_start = len(output)
+        send("m")
+        check_metric_order(minimal_start)
+        send("m")
         send("a")
         send("宁德")
         send("\r")  # choose instrument
@@ -57,6 +72,9 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         send("\x15")  # Ctrl+u clears the current setting
         send("上证指数,深证成指,恒生指数,科创50,沪深300")
         send("\r")
+        config_deadline = time.monotonic() + 5
+        while '"hkHSI"' not in Path(data, "config.toml").read_text() and time.monotonic() < config_deadline:
+            drain(0.1)
         assert '"hkHSI"' in Path(data, "config.toml").read_text(), "index configuration was not saved"
         send("/")
         send("510300")
@@ -99,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         assert b"\x1b[?1006h" in output, "mouse capture not enabled"
         assert b"\x1b[?1006l" in output, "mouse capture not disabled"
         assert b"\x1b[?1049l" in output, "alternate screen not restored"
-        print("PTY smoke passed: Chinese/ETF search, resident indices, groups, modes, heatmap, pause, resize, help, exit")
+        print("PTY smoke passed: metric order in both modes, Chinese/ETF search, resident indices, groups, modes, heatmap, pause, resize, help, exit")
     finally:
         try:
             os.kill(pid, signal.SIGKILL)

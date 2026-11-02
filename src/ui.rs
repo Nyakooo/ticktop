@@ -482,7 +482,7 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     }
     let metrics = q
         .map(quote_metrics)
-        .unwrap_or_else(|| "成交量 --  换手率 --".into());
+        .unwrap_or_else(|| "成交量 --  换手率 --  量比 --".into());
     f.render_widget(
         Paragraph::new(vec![
             Line::from(quote),
@@ -670,7 +670,7 @@ fn price_scale(
 
 fn quote_metrics(q: &Quote) -> String {
     format!(
-        "成交量 {}  换手率 {}",
+        "成交量 {}  换手率 {}  量比 {}",
         q.volume_lots
             .map(|v| if v >= 10000. {
                 format!("{:.2}万手", v / 10000.)
@@ -680,6 +680,9 @@ fn quote_metrics(q: &Quote) -> String {
             .unwrap_or_else(|| "--".into()),
         q.turnover_percent
             .map(|v| format!("{v:.2}%"))
+            .unwrap_or_else(|| "--".into()),
+        q.volume_ratio
+            .map(|v| format!("{v:.2}"))
             .unwrap_or_else(|| "--".into())
     )
 }

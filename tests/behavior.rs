@@ -1022,7 +1022,7 @@ fn intraday_axis_is_fixed_and_ignores_lunch_duration() {
 }
 #[test]
 fn mainland_volume_amount_and_turnover_are_optional_and_unit_preserving() {
-    let mut f = vec![""; 39];
+    let mut f = vec![""; 50];
     f[1] = "平安银行";
     f[3] = "11.69";
     f[4] = "11.64";
@@ -1033,6 +1033,7 @@ fn mainland_volume_amount_and_turnover_are_optional_and_unit_preserving() {
     f[34] = "11.57";
     f[37] = "42163";
     f[38] = "0.19";
+    f[49] = "1.99";
     let parse = |f: &[&str]| {
         market::parse_quotes(&format!("v_sz000001=\"{}\";", f.join("~")))
             .unwrap()
@@ -1042,10 +1043,13 @@ fn mainland_volume_amount_and_turnover_are_optional_and_unit_preserving() {
     assert_eq!(q.volume_lots, Some(361600.));
     assert_eq!(q.amount_wan, Some(42163.));
     assert_eq!(q.turnover_percent, Some(0.19));
+    assert_eq!(q.volume_ratio, Some(1.99));
+    f[49] = "NaN";
     f[38] = "NaN";
     f[37] = "-1";
     f[6] = "";
     let q = parse(&f);
+    assert!(q.volume_ratio.is_none());
     assert!(q.volume_lots.is_none() && q.amount_wan.is_none() && q.turnover_percent.is_none());
 }
 
@@ -1076,4 +1080,7 @@ fn market_amount_stays_visible_across_modes_and_views() {
     assert!(rendered.contains("15:00"));
     assert!(rendered.contains("成交量 12.35万手"));
     assert!(rendered.contains("换手率 1.23%"));
+    assert!(rendered.contains("量比 1.56"));
+    app.user.mode = Mode::Minimal;
+    assert!(screen(&app, 160, 42).contains("量比 1.56"));
 }

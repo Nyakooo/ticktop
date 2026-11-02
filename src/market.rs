@@ -208,6 +208,7 @@ pub fn parse_quotes(text: &str) -> Result<Vec<Quote>> {
             volume_lots: mainland_number(&fields, 6, id),
             amount_wan: mainland_number(&fields, 37, id),
             turnover_percent: mainland_number(&fields, 38, id),
+            volume_ratio: mainland_number(&fields, 49, id),
         });
     }
     Ok(parsed)
@@ -580,6 +581,7 @@ pub fn demo_quotes(ids: &[String]) -> Vec<Quote> {
                 volume_lots: Some(123456.),
                 amount_wan: Some(1250000.),
                 turnover_percent: Some(1.23),
+                volume_ratio: Some(1.56),
             }
         })
         .collect()

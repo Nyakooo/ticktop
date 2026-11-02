@@ -96,6 +96,8 @@ pub struct Quote {
     pub amount_wan: Option<f64>,
     #[serde(default)]
     pub turnover_percent: Option<f64>,
+    #[serde(default)]
+    pub volume_ratio: Option<f64>,
 }
 impl Quote {
     pub fn change(&self) -> Price {

@@ -80,9 +80,18 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         send("\r")  # choose instrument
         send("\x1b[B")  # choose first named group
         send("\r")
+        send("\x1b[1;5B")  # Ctrl+Down manually reorders the selected stock
+        send("t")  # pin within this group
+        send("e")
+        send("worker-1")
+        send("\r")
         send("g")
         send("n")
         send("摸鱼观察")
+        send("\r")
+        send("r")
+        send("\x15")
+        send("观察清单")
         send("\r")
         send("i")
         send("\x15")  # Ctrl+u clears the current setting
@@ -129,7 +138,10 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         assert state["mode"] == "minimal"
         assert state["heatmap"] is True
         assert state["sector_category"] == "concept"
-        assert any(g["name"] == "摸鱼观察" for g in state["groups"])
+        assert any(g["name"] == "观察清单" for g in state["groups"])
+        assert state["custom_aliases"]["sz300750"] == "worker-1"
+        assert "sz300750" in state["pinned"]["1"]
+        assert next(g for g in state["groups"] if g["id"] == 1)["symbols"][1] == "sz300750"
         assert b"\x1b[?1006h" in output, "mouse capture not enabled"
         assert b"\x1b[?1006l" in output, "mouse capture not disabled"
         assert b"\x1b[?1049l" in output, "alternate screen not restored"

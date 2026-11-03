@@ -35,6 +35,10 @@ pub enum Modal {
         id: Option<u64>,
         input: String,
     },
+    Alias {
+        id: String,
+        input: String,
+    },
     Confirm(Confirm),
     Settings {
         draft: Config,
@@ -622,6 +626,49 @@ impl App {
             KeyCode::Char(' ') => self.toggle_pause(),
             KeyCode::Char('/') => self.open_search(false),
             KeyCode::Char('a') => self.open_search(true),
+            KeyCode::Char('t') if !self.user.heatmap => {
+                if let Some(id) = self.user.selected.clone() {
+                    match self.user.toggle_pin(&id) {
+                        Ok(()) => {
+                            self.save_state_change();
+                        }
+                        Err(e) => self.message = e.to_string(),
+                    }
+                }
+            }
+            KeyCode::Char('e') if !self.user.heatmap => {
+                if let Some(id) = self.user.selected.clone()
+                    && self.visible().contains(&id)
+                {
+                    let input = self
+                        .user
+                        .custom_aliases
+                        .get(&id)
+                        .cloned()
+                        .unwrap_or_default();
+                    self.modal = Some(Modal::Alias { id, input });
+                }
+            }
+            KeyCode::Char('r') if !self.user.heatmap => {
+                if self.user.group != 0 {
+                    self.modal = Some(Modal::GroupName {
+                        id: Some(self.user.group),
+                        input: self.user.group_name().into(),
+                    });
+                } else {
+                    self.message = "全部自选为系统分组；g 管理自定义分组".into();
+                }
+            }
+            KeyCode::Up | KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(id) = self.user.selected.clone() {
+                    match self.user.move_symbol(&id, key.code == KeyCode::Down) {
+                        Ok(()) => {
+                            self.save_state_change();
+                        }
+                        Err(e) => self.message = e.to_string(),
+                    }
+                }
+            }
             KeyCode::Char('g') => {
                 self.modal = Some(Modal::Groups {
                     index: self
@@ -850,6 +897,18 @@ impl App {
             Modal::Groups { mut index } => {
                 let n = self.user.groups.len();
                 match key.code {
+                    KeyCode::Up | KeyCode::Down
+                        if n > 0 && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        let next = if key.code == KeyCode::Down {
+                            (index + 1).min(n - 1)
+                        } else {
+                            index.saturating_sub(1)
+                        };
+                        self.user.groups.swap(index, next);
+                        index = next;
+                        self.save_state_change();
+                    }
                     KeyCode::Down if n > 0 => index = (index + 1) % n,
                     KeyCode::Up if n > 0 => index = (index + n - 1) % n,
                     KeyCode::Char('n') => {
@@ -880,6 +939,20 @@ impl App {
                     _ => {}
                 }
                 Some(Modal::Groups { index })
+            }
+            Modal::Alias { id, mut input } => {
+                if key.code == KeyCode::Enter {
+                    match self.user.set_alias(&id, &input) {
+                        Ok(()) => {
+                            self.save_state_change();
+                            return;
+                        }
+                        Err(e) => self.message = e.to_string(),
+                    }
+                } else {
+                    Self::input_char(&mut input, key);
+                }
+                Some(Modal::Alias { id, input })
             }
             Modal::GroupName { id, mut input } => {
                 if key.code == KeyCode::Enter {

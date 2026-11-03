@@ -171,9 +171,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "m 简约  h 自选行情   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  i 常驻  , 设置  ? 帮助  q 退出"
         }
     } else if app.user.mode == Mode::Minimal {
-        "m mode  h view  [] group  / find  a add  g groups  , cfg  ?  q"
+        "m mode  t pin  Ctrl+↑↓ sort  e alias  g groups  / find  ?  q"
     } else {
-        "m 简约  h 大盘云图  [] 分组  ↑↓ 选股  ←→ 周期  / 搜索  a 添加  g 分组  i 常驻  , 设置  ? 帮助  q 退出"
+        "m 简约  h 云图  t 置顶  Ctrl+↑↓ 排序  e 别名  g 分组  / 搜索  ←→ 周期  ? 帮助  q 退出"
     };
     frame.render_widget(
         Paragraph::new(keys).style(Style::default().fg(p.dim)),
@@ -434,7 +434,14 @@ fn full(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             Row::new(vec![
                 Cell::from(vec![
                     Line::from(name),
-                    Line::from(text(id.get(2..).unwrap_or(id).to_string(), p.dim)),
+                    Line::from(text(
+                        format!(
+                            "{}{}",
+                            if app.user.is_pinned(id) { "↑ " } else { "" },
+                            id.get(2..).unwrap_or(id)
+                        ),
+                        p.dim,
+                    )),
                 ]),
                 Cell::from(price)
                     .style(Style::default().fg(q.map(|q| p.change(q.percent())).unwrap_or(p.dim))),
@@ -1150,32 +1157,42 @@ fn volume_chart(
 fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let areas = Layout::vertical([Constraint::Min(4), Constraint::Length(5)]).split(r);
     let ids = app.visible();
+    let show_age = r.width >= 72;
     let rows = ids
         .iter()
         .map(|id| {
             let q = app.quotes.get(id);
-            Row::new([
-                id.clone(),
+            let mut cells = vec![
+                format!("{}{}", if app.user.is_pinned(id) { "^" } else { "" }, id),
+                app.user.alias(id),
                 q.map(|q| crate::instruments::price(&q.id, q.price))
                     .unwrap_or_else(|| "--".into()),
                 q.map(|q| format!("{:+.2}", q.percent()))
                     .unwrap_or_else(|| "--".into()),
-                q.map(|q| q.age_secs().to_string())
-                    .unwrap_or_else(|| "--".into()),
-            ])
+            ];
+            if show_age {
+                cells.push(
+                    q.map(|q| q.age_secs().to_string())
+                        .unwrap_or_else(|| "--".into()),
+                );
+            }
+            Row::new(cells)
         })
         .collect::<Vec<_>>();
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(9),
-            Constraint::Length(14),
-            Constraint::Length(12),
-            Constraint::Min(8),
-        ],
-    )
-    .header(Row::new(["code", "value", "delta%", "age(s)"]).style(Style::default().fg(p.dim)))
-    .row_highlight_style(Style::default().bg(p.selected));
+    let mut widths = vec![
+        Constraint::Length(9),
+        Constraint::Length(12),
+        Constraint::Length(12),
+        Constraint::Min(7),
+    ];
+    let mut headers = vec!["code", "alias", "value", "delta%"];
+    if show_age {
+        widths.push(Constraint::Length(8));
+        headers.push("age(s)");
+    }
+    let table = Table::new(rows, widths)
+        .header(Row::new(headers).style(Style::default().fg(p.dim)))
+        .row_highlight_style(Style::default().bg(p.selected));
     let mut state = TableState::default().with_selected(
         ids.iter()
             .position(|id| Some(id) == app.user.selected.as_ref()),
@@ -1439,6 +1456,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         Modal::Groups { .. } => "自选分组",
         Modal::GroupName { id: Some(_), .. } => "重命名分组",
         Modal::GroupName { .. } => "新建分组",
+        Modal::Alias { .. } => "简约模式别名",
         Modal::Confirm(_) => "确认",
         Modal::Settings { .. } => "行情与网络设置",
     };
@@ -1481,11 +1499,14 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "m 完整/简约    h 行情/大盘云图    [ ] 自选分组",
                 "↑↓ 选择股票   ←→ 日内/1周/1月   j/k 走势游标",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
-                "g 分组管理（n 新建 / r 重命名 / d 删除）",
+                "g 分组管理（n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序）",
+                "t 置顶/取消 · Ctrl+↑↓ 当前分组自选排序 · e 设置 alias",
+                "r 修改当前分组名称；全部自选不可重命名",
                 ", 设置  i 常驻指数  Space 暂停显示  Esc 返回  q 退出",
                 "指数单位为点，ETF 保留三位小数；常驻栏 * 表示源报价超过120秒。",
                 "搜索输入中文/代码/拼音/首字母；Ctrl+a 加入分组",
-                "简约：code=股票代码；value=价格；delta%=较昨收",
+                "简约：code=代码（^置顶）；alias=自定义别名/默认编号",
+                "value=价格；delta%=较昨收；e 编辑别名，留空恢复编号",
                 "age(s)=源报价年龄；E01 报价 / E02 走势 / E03 板块失败",
                 "云图：Tab 分类，方向键选择，PgUp/PgDn 或 n/p 翻页；鼠标点击/滚轮",
                 "云图：s 切换涨幅/跌幅/规模排序；规模=成分股数。",
@@ -1641,7 +1662,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
             );
             f.render_widget(
                 Paragraph::new(
-                    "n 新建 / r 重命名 / d 删除 / Enter 切换\n删除分组保留股票；全部自选不可删除",
+                    "n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序 / Enter 切换\n删除分组保留股票；全部自选不可删除",
                 )
                 .style(Style::default().fg(p.dim)),
                 parts[1],
@@ -1649,6 +1670,28 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         }
         Modal::GroupName { input, .. } => {
             draw_input(f, inner, input, p);
+        }
+        Modal::Alias { id, input } => {
+            let rows = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Length(2),
+                Constraint::Min(1),
+            ])
+            .split(inner);
+            f.render_widget(
+                Paragraph::new(format!("{id} · 最多12显示列；股票代码仍保留")),
+                rows[0],
+            );
+            draw_input(f, rows[1], input, p);
+            f.render_widget(
+                Paragraph::new(
+                    "Enter 保存 · 留空恢复编号 · Ctrl+u 清空
+Esc 取消；别名不能与其他自选别名或编号重复",
+                )
+                .style(Style::default().fg(p.dim))
+                .wrap(Wrap { trim: true }),
+                rows[2],
+            );
         }
         Modal::Confirm(action) => {
             let msg = match action {

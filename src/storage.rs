@@ -54,6 +54,8 @@ pub struct UserState {
     pub groups: Vec<Group>,
     pub aliases: BTreeMap<String, u64>,
     pub next_alias: u64,
+    pub custom_aliases: BTreeMap<String, String>,
+    pub pinned: BTreeMap<u64, Vec<String>>,
     pub mode: Mode,
     pub group: u64,
     pub selected: Option<String>,
@@ -92,6 +94,8 @@ impl Default for UserState {
             ],
             aliases,
             next_alias: 7,
+            custom_aliases: BTreeMap::new(),
+            pinned: BTreeMap::new(),
             mode: Mode::Full,
             group: 0,
             period: Period::Intraday,
@@ -149,10 +153,32 @@ impl UserState {
         {
             bail!("自选编号数据无效");
         }
+        for (group, symbols) in &self.pinned {
+            let members = if *group == 0 {
+                &self.watchlist
+            } else {
+                &self
+                    .groups
+                    .iter()
+                    .find(|g| g.id == *group)
+                    .context("置顶分组不存在")?
+                    .symbols
+            };
+            let mut seen = std::collections::HashSet::new();
+            if symbols
+                .iter()
+                .any(|id| !members.contains(id) || !seen.insert(id))
+            {
+                bail!("置顶列表无效");
+            }
+        }
+        for (id, name) in &self.custom_aliases {
+            self.check_alias(id, name)?;
+        }
         Ok(())
     }
     pub fn visible(&self) -> Vec<String> {
-        if self.group == 0 {
+        let mut rows = if self.group == 0 {
             self.watchlist.clone()
         } else {
             self.groups
@@ -160,7 +186,92 @@ impl UserState {
                 .find(|g| g.id == self.group)
                 .map(|g| g.symbols.clone())
                 .unwrap_or_default()
+        };
+        rows.sort_by_key(|id| !self.is_pinned(id));
+        rows
+    }
+    pub fn is_pinned(&self, id: &str) -> bool {
+        self.pinned
+            .get(&self.group)
+            .is_some_and(|ids| ids.iter().any(|s| s == id))
+    }
+    pub fn toggle_pin(&mut self, id: &str) -> Result<()> {
+        if !self.visible().iter().any(|s| s == id) {
+            bail!("标的不在当前分组");
         }
+        let ids = self.pinned.entry(self.group).or_default();
+        if ids.iter().any(|s| s == id) {
+            ids.retain(|s| s != id);
+        } else {
+            ids.push(id.into());
+        }
+        Ok(())
+    }
+    pub fn move_symbol(&mut self, id: &str, down: bool) -> Result<()> {
+        let visible = self.visible();
+        let i = visible
+            .iter()
+            .position(|s| s == id)
+            .context("标的不在当前分组")?;
+        let next = if down { i + 1 } else { i.saturating_sub(1) };
+        if next == i || next >= visible.len() {
+            return Ok(());
+        }
+        if self.is_pinned(id) != self.is_pinned(&visible[next]) {
+            bail!("置顶项与普通项分别排序，按 t 切换置顶");
+        }
+        let rows = if self.group == 0 {
+            &mut self.watchlist
+        } else {
+            &mut self
+                .groups
+                .iter_mut()
+                .find(|g| g.id == self.group)
+                .context("分组不存在")?
+                .symbols
+        };
+        let a = rows.iter().position(|s| s == id).unwrap();
+        let b = rows.iter().position(|s| s == &visible[next]).unwrap();
+        rows.swap(a, b);
+        Ok(())
+    }
+    fn check_alias(&self, id: &str, name: &str) -> Result<()> {
+        if !self.watchlist.iter().any(|s| s == id) {
+            bail!("请先加入自选");
+        }
+        if name.trim() != name
+            || name.is_empty()
+            || unicode_width::UnicodeWidthStr::width(name) == 0
+            || unicode_width::UnicodeWidthStr::width(name) > 12
+            || name.chars().any(char::is_control)
+        {
+            bail!("别名需为 1–12 列可显示字符");
+        }
+        if self
+            .aliases
+            .iter()
+            .any(|(other, n)| other != id && format!("{n:03}") == name)
+            || self
+                .watchlist
+                .iter()
+                .any(|other| other != id && self.alias(other).eq_ignore_ascii_case(name))
+        {
+            bail!("别名已被其他自选使用");
+        }
+        Ok(())
+    }
+    pub fn set_alias(&mut self, id: &str, input: &str) -> Result<()> {
+        let name = input.trim();
+        if !self.watchlist.iter().any(|s| s == id) {
+            bail!("请先加入自选");
+        }
+        if name.is_empty() {
+            self.custom_aliases.remove(id);
+        } else {
+            self.check_alias(id, name)?;
+            self.custom_aliases.insert(id.into(), name.into());
+        }
+        Ok(())
     }
     pub fn group_name(&self) -> &str {
         if self.group == 0 {
@@ -183,6 +294,13 @@ impl UserState {
         if !self.watchlist.iter().any(|s| s == id) {
             self.watchlist.push(id.into());
             if !self.aliases.contains_key(id) {
+                while self
+                    .custom_aliases
+                    .values()
+                    .any(|v| v == &format!("{:03}", self.next_alias))
+                {
+                    self.next_alias += 1;
+                }
                 self.aliases.insert(id.into(), self.next_alias);
                 self.next_alias += 1;
             }
@@ -197,11 +315,18 @@ impl UserState {
     pub fn remove(&mut self, id: &str) {
         if self.group == 0 {
             self.watchlist.retain(|s| s != id);
+            self.custom_aliases.remove(id);
+            for pinned in self.pinned.values_mut() {
+                pinned.retain(|s| s != id);
+            }
             for g in &mut self.groups {
                 g.symbols.retain(|s| s != id);
             }
         } else if let Some(g) = self.groups.iter_mut().find(|g| g.id == self.group) {
             g.symbols.retain(|s| s != id);
+            if let Some(pinned) = self.pinned.get_mut(&self.group) {
+                pinned.retain(|s| s != id);
+            }
         }
     }
     pub fn create_group(&mut self, name: &str) -> Result<u64> {
@@ -239,11 +364,15 @@ impl UserState {
     }
     pub fn delete_group(&mut self, id: u64) {
         self.groups.retain(|g| g.id != id);
+        self.pinned.remove(&id);
         if self.group == id {
             self.group = 0;
         }
     }
     pub fn alias(&self, id: &str) -> String {
+        if let Some(name) = self.custom_aliases.get(id) {
+            return name.clone();
+        }
         self.aliases
             .get(id)
             .map(|n| format!("{n:03}"))

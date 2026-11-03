@@ -1206,3 +1206,100 @@ fn turnover_comparison_is_aligned_optional_and_respects_pause() {
     });
     assert!(app.turnover.is_none() && app.quote_error.is_none());
 }
+
+#[test]
+fn pinning_manual_order_and_aliases_persist_without_cross_group_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    let mut state = UserState::default();
+    let ids = state.watchlist.clone();
+    let mut numeric = state.clone();
+    numeric.set_alias(&ids[0], "007").unwrap();
+    numeric.add("sh600000", 0).unwrap();
+    assert_eq!(numeric.alias("sh600000"), "008");
+    numeric.save(&path).unwrap();
+    let other = state.groups[0].symbols.clone();
+    state.move_symbol(&ids[1], false).unwrap();
+    assert_eq!(state.visible()[0], ids[1]);
+    assert_eq!(state.groups[0].symbols, other);
+    state.toggle_pin(&ids[2]).unwrap();
+    assert_eq!(state.visible()[0], ids[2]);
+    assert!(state.move_symbol(&ids[2], true).is_err());
+    state.toggle_pin(&ids[1]).unwrap();
+    state.move_symbol(&ids[2], false).unwrap();
+    assert_eq!(state.visible()[0], ids[2]);
+    state.set_alias(&ids[0], "cpu0").unwrap();
+    assert!(state.set_alias(&ids[1], "CPU0").is_err());
+    assert!(state.set_alias(&ids[1], "001").is_err());
+    assert!(state.set_alias(&ids[1], "\u{1b}oops").is_err());
+    assert!(state.set_alias(&ids[1], "abcdefghijklmn").is_err());
+    assert!(state.set_alias(&ids[1], "\u{200b}").is_err());
+    state.group = 1;
+    assert!(!state.is_pinned(&ids[2]));
+    state.toggle_pin(&ids[0]).unwrap();
+    state.set_alias(&ids[1], "core").unwrap();
+    state.rename_group(1, "我的观察").unwrap();
+    state.save(&path).unwrap();
+    let mut loaded = UserState::load(&path).unwrap();
+    assert_eq!(loaded.alias(&ids[0]), "cpu0");
+    assert!(loaded.is_pinned(&ids[0]));
+    assert_eq!(loaded.group_name(), "我的观察");
+    loaded.remove(&ids[0]);
+    assert!(!loaded.visible().contains(&ids[0]));
+    loaded.group = 0;
+    assert!(loaded.watchlist.contains(&ids[0]));
+    assert_eq!(loaded.alias(&ids[0]), "cpu0");
+    loaded.remove(&ids[0]);
+    assert!(!loaded.custom_aliases.contains_key(&ids[0]));
+    loaded.delete_group(1);
+    loaded.save(&path).unwrap();
+    UserState::load(&path).unwrap();
+    let mut legacy = serde_json::to_value(UserState::default()).unwrap();
+    legacy.as_object_mut().unwrap().remove("pinned");
+    legacy.as_object_mut().unwrap().remove("custom_aliases");
+    std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let legacy = UserState::load(&path).unwrap();
+    assert!(legacy.pinned.is_empty() && legacy.custom_aliases.is_empty());
+}
+#[test]
+fn watchlist_shortcuts_rename_and_minimal_alias_keep_code_visible() {
+    let (_dir, mut app) = app();
+    let ids = app.user.watchlist.clone();
+    app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL));
+    assert_eq!(app.visible()[1], ids[0]);
+    app.key(key(KeyCode::Char('t')));
+    assert_eq!(app.visible()[0], ids[0]);
+    assert_eq!(app.user.selected.as_deref(), Some(ids[0].as_str()));
+    app.key(key(KeyCode::Char('e')));
+    for c in "worker-1".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    app.key(key(KeyCode::Enter));
+    app.user.mode = Mode::Minimal;
+    let text = screen(&app, 80, 24);
+    assert!(
+        text.contains("worker-1")
+            && text.contains(&format!("^{}", ids[0]))
+            && text.contains("alias")
+    );
+    app.key(key(KeyCode::Char('e')));
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.key(key(KeyCode::Esc));
+    assert_eq!(app.user.alias(&ids[0]), "worker-1");
+    app.user.group = 1;
+    app.key(key(KeyCode::Char('r')));
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    for c in "观察清单".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    app.key(key(KeyCode::Enter));
+    assert_eq!(app.user.group_name(), "观察清单");
+    let first = app.user.groups[0].id;
+    app.key(key(KeyCode::Char('g')));
+    app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL));
+    app.key(key(KeyCode::Esc));
+    assert_eq!(app.user.groups[1].id, first);
+    let saved = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
+    assert_eq!(saved.alias(&ids[0]), "worker-1");
+    assert_eq!(saved.groups[1].name, "观察清单");
+}

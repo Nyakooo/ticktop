@@ -609,7 +609,7 @@ fn chip_panel(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             lines.push(Line::from(vec![
                 text(format!("{price:>8.2} "), p.dim),
                 text(
-                    "▇".repeat(len),
+                    "─".repeat(len),
                     if price <= d.close { p.up } else { p.down },
                 ),
             ]));

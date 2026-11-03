@@ -1148,37 +1148,30 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     );
     f.render_stateful_widget(table, areas[0], &mut state);
     let code = app.user.selected.clone().unwrap_or_default();
-    let mut samples = vec![format!("{code} / {}", app.user.period.key())];
+    let mut samples = vec![format!("{code} / {}", app.user.period.label())];
     if let Some(q) = app.quotes.get(&code) {
         samples.push(quote_metrics(q));
     }
-    if let Some(s) = app.series() {
-        if let Some(pt) = s
+    if let Some(s) = app.series()
+        && let Some(pt) = s
             .points
             .get(app.chart_cursor.unwrap_or(s.points.len().saturating_sub(1)))
-        {
-            samples.push(format!(
-                "\n{}  价 {}  成交量 {}",
-                pt.label,
-                crate::instruments::price(&s.id, pt.price),
-                volume_text(pt.volume, &s.id)
-            ));
-        }
-        let n = s.points.len();
-        if n > 0 {
-            let count = ((r.width as usize).saturating_sub(14) / 12)
-                .clamp(1, 8)
-                .min(n);
-            for i in 0..count {
-                let idx = if count == 1 {
-                    n - 1
-                } else {
-                    i * (n - 1) / (count - 1)
-                };
-                samples.push(crate::instruments::price(&s.id, s.points[idx].price));
-            }
-        }
+    {
+        let (time_label, price_label, volume_label) = match s.period {
+            Period::Intraday => ("时间", "价格", "分钟成交量"),
+            Period::Day => ("日期", "收盘价", "日成交量"),
+            Period::Week => ("日期", "收盘价", "周成交量"),
+            Period::Month => ("日期", "收盘价", "月成交量"),
+        };
+        samples.push(format!(
+            "\n{time_label} {}  {price_label} {} {}  {volume_label} {}",
+            pt.label,
+            crate::instruments::price(&s.id, pt.price),
+            crate::instruments::unit(&s.id),
+            volume_text(pt.volume, &s.id)
+        ));
     }
+
     if let Some(d) = app.user.selected.as_ref().and_then(|id| app.chips.get(id)) {
         samples.push(format!(
             "\n筹码估算  均价 {:.2}  90% {:.2}–{:.2}  日线获利 {:.1}%  截至 {}{}",

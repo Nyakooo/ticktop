@@ -1153,7 +1153,10 @@ fn daily_candles_and_volume_render_and_cursor_pans_to_older_dates() {
     assert!(screen(&app, 160, 42).contains("2020-01-02"));
     app.user.mode = Mode::Minimal;
     let rendered = screen(&app, 160, 42);
-    assert!(rendered.contains("2020-01-02") && rendered.contains("成交量"));
+    assert!(rendered.contains("日期 2020-01-02") && rendered.contains("日成交量"));
+    assert!(rendered.contains(" / 日 K"));
+    assert!(rendered.contains("收盘价"));
+    assert!(!rendered.contains(" / kday"));
     app.persist().unwrap();
     let state = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
     assert_eq!(state.period, Period::Day);

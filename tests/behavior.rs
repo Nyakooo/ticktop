@@ -1373,3 +1373,22 @@ fn unknown_or_invalid_settings_explain_recovery_without_modifying_files() {
     assert!(!ticktop::storage::create_settings(&state_path, b"replacement").unwrap());
     assert!(UserState::load(&state_path).is_ok());
 }
+
+#[test]
+fn stock_chips_remain_visible_in_all_chart_periods_and_narrow_windows() {
+    let (_dir, mut app) = app();
+    let id = app.user.selected.clone().unwrap();
+    app.on_market(MarketEvent::Chips(ticktop::chips::demo(&id)));
+    for period in Period::ALL {
+        app.user.period = period;
+        app.on_market(MarketEvent::Chart(market::demo_history(&id, period)));
+        for (w, h) in [(160, 42), (130, 36), (100, 30), (80, 24)] {
+            let rendered = screen(&app, w, h);
+            assert!(
+                rendered.contains("筹码峰"),
+                "chips hidden in {period:?} at {w}x{h}"
+            );
+            assert!(!rendered.contains("▇"), "chip bars must remain thin lines");
+        }
+    }
+}

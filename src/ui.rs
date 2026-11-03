@@ -557,10 +557,7 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         })
         .collect::<Vec<_>>();
     f.render_widget(Paragraph::new(Line::from(tabs)), rows[2]);
-    if crate::instruments::is_index(id)
-        || crate::instruments::is_etf(id)
-        || (app.user.period != Period::Intraday && rows[3].width < 100)
-    {
+    if crate::instruments::is_index(id) || crate::instruments::is_etf(id) {
         price_chart(f, app, rows[3], p);
     } else if rows[3].width >= 66 {
         let panes = Layout::horizontal([Constraint::Min(30), Constraint::Length(31)])

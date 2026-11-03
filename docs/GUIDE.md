@@ -246,7 +246,7 @@ Git Bash 也支持 README 中的 `curl ... | bash` 命令，自动调用 Windows
 
 ```powershell
 $env:TICKTOP_INSTALL_DIR = 'C:\Tools\Ticktop'
-$env:TICKTOP_VERSION = 'v0.3.1'
+$env:TICKTOP_VERSION = 'v0.4.0'
 irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
 ```
 

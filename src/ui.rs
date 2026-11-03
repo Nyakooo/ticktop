@@ -327,7 +327,10 @@ fn index_bar(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             continue;
         }
         let name = if app.user.mode == Mode::Minimal {
-            id.as_str()
+            app.user
+                .custom_aliases
+                .get(id)
+                .map_or(id.as_str(), String::as_str)
         } else {
             crate::instruments::INDICES
                 .iter()
@@ -1163,8 +1166,14 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .map(|id| {
             let q = app.quotes.get(id);
             let mut cells = vec![
-                format!("{}{}", if app.user.is_pinned(id) { "^" } else { "" }, id),
-                app.user.alias(id),
+                format!(
+                    "{}{}",
+                    if app.user.is_pinned(id) { "^" } else { "" },
+                    app.user
+                        .custom_aliases
+                        .get(id)
+                        .map_or(id.as_str(), String::as_str)
+                ),
                 q.map(|q| crate::instruments::price(&q.id, q.price))
                     .unwrap_or_else(|| "--".into()),
                 q.map(|q| format!("{:+.2}", q.percent()))
@@ -1180,12 +1189,11 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         })
         .collect::<Vec<_>>();
     let mut widths = vec![
-        Constraint::Length(9),
-        Constraint::Length(12),
+        Constraint::Length(14),
         Constraint::Length(12),
         Constraint::Min(7),
     ];
-    let mut headers = vec!["code", "alias", "value", "delta%"];
+    let mut headers = vec!["item", "value", "delta%"];
     if show_age {
         widths.push(Constraint::Length(8));
         headers.push("age(s)");
@@ -1199,7 +1207,8 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     );
     f.render_stateful_widget(table, areas[0], &mut state);
     let code = app.user.selected.clone().unwrap_or_default();
-    let mut samples = vec![format!("{code} / {}", app.user.period.label())];
+    let label = app.user.custom_aliases.get(&code).unwrap_or(&code);
+    let mut samples = vec![format!("{label} / {}", app.user.period.label())];
     if let Some(q) = app.quotes.get(&code) {
         samples.push(quote_metrics(q));
     }
@@ -1505,7 +1514,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 ", 设置  i 常驻指数  Space 暂停显示  Esc 返回  q 退出",
                 "指数单位为点，ETF 保留三位小数；常驻栏 * 表示源报价超过120秒。",
                 "搜索输入中文/代码/拼音/首字母；Ctrl+a 加入分组",
-                "简约：code=代码（^置顶）；alias=自定义别名/默认编号",
+                "简约：item=自定义别名，未设置时为代码（^置顶）",
                 "value=价格；delta%=较昨收；e 编辑别名，留空恢复编号",
                 "age(s)=源报价年龄；E01 报价 / E02 走势 / E03 板块失败",
                 "云图：Tab 分类，方向键选择，PgUp/PgDn 或 n/p 翻页；鼠标点击/滚轮",
@@ -1679,7 +1688,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
             ])
             .split(inner);
             f.render_widget(
-                Paragraph::new(format!("{id} · 最多12显示列；股票代码仍保留")),
+                Paragraph::new(format!("{id} · 最多12显示列；简约视图以别名替代代码")),
                 rows[0],
             );
             draw_input(f, rows[1], input, p);

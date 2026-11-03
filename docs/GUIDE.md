@@ -144,14 +144,23 @@ ticktop --interval 10s
 
 默认路径：
 
-| 文件 | Linux | macOS |
+| 平台 | `config.toml` 所在目录 | `state.json` 所在目录 |
 | --- | --- | --- |
-| 配置 | `$XDG_CONFIG_HOME/ticktop/config.toml`，默认 `~/.config/ticktop/config.toml` | `~/Library/Application Support/ticktop/config.toml` |
-| 数据 | `$XDG_DATA_HOME/ticktop/`，默认 `~/.local/share/ticktop/` | `~/Library/Application Support/ticktop/` |
+| Linux | `~/.config/ticktop/` | `~/.local/share/ticktop/` |
+| macOS | `~/Library/Application Support/ticktop/` | 同左 |
+| Windows | `%APPDATA%\ticktop\config\` | `%LOCALAPPDATA%\ticktop\data\` |
 
-数据目录保存 `state.json`、SQLite 缓存。`--data-dir DIR` 将配置和数据都放入 DIR。
-演示使用独立的 `demo-state.json` / `demo-cache.sqlite3`。
-损坏的自选文件会报错，程序不会偷偷覆盖它；请先备份再修复。
+Linux 设置了 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` 时，分别使用对应变量下的 `ticktop/` 目录。
+
+迁移到另一台电脑时，退出 Ticktop，将两个文件分别复制到新电脑对应的默认目录，正常运行 `ticktop` 即可自动读取，不需要导入命令、启动参数或指定目录。使用相同或更新版本，以识别文件中的功能字段。
+
+- `config.toml`：默认模式、常驻指数、刷新间隔、代理等运行设置。
+- `state.json`：自选、分组及名称、排序、置顶、alias、显示模式与周期、云图设置。
+- 不必复制 SQLite 行情缓存，新电脑会重新获取行情；演示模式使用独立的 `demo-state.json` / `demo-cache.sqlite3`。
+
+正常启动时，缺失文件会自动创建为可编辑的默认文件。语法错误、未知字段或无效取值会提示具体文件路径以及备份、修复或删除后重建的方法；不会静默覆盖或自动删除个人文件。替换文件后重新启动，运行期间的界面调整仍自动保存回这些文件。
+
+已有 `--data-dir DIR` 功能继续保留，但正常使用与跨平台迁移不需要它。
 
 ## 免费数据与边界
 
@@ -272,6 +281,6 @@ irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1
 - `t`：置顶 / 取消当前自选。完整模式代码前显示 `↑`，简约模式显示 `^`。全部自选和各分组分别保存置顶及顺序。
 - `Ctrl+↑ / Ctrl+↓`：将当前股票上移 / 下移一位。置顶区、普通区分别排序，跨区时提示先切换置顶。移动后仍选中原股票。
 - `r`：修改当前分组名称；也可以 `g` 打开分组管理，`↑↓` 选择后按 `r`。全部自选是系统分组，不可重命名。在 `g` 菜单中，`Ctrl+↑↓` 调整自定义分组顺序。
-- `e`：为当前自选设置简约模式 alias。最多 12 个显示列，支持中英文或数字，不能与其他自选别名或已分配编号重复。留空保存恢复原编号，`Ctrl+u` 清空输入，`Esc` 取消。简约列表同时保留代码与 alias；窗口窄时隐藏报价年龄列。
+- `e`：为当前自选设置简约模式 alias。最多 12 个显示列，支持中英文或数字，不能与其他自选别名或已分配编号重复。留空保存恢复原编号，`Ctrl+u` 清空输入，`Esc` 取消。简约列表与选中标的摘要在设置 alias 后以别名代替代码；未设置时仍显示股票代码。窗口窄时隐藏报价年龄列。
 
 以上操作立即保存到个人状态文件，重启后保留；旧状态文件无需手动迁移。删除分组不会删除股票或全局 alias；从“全部自选”删除股票时会清理该股票的置顶与自定义 alias。

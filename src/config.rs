@@ -67,7 +67,7 @@ pub enum ProxyMode {
     Direct,
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Network {
     pub proxy_mode: ProxyMode,
     pub proxy_url: String,
@@ -92,7 +92,7 @@ impl std::fmt::Debug for Network {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Refresh {
     pub quotes_secs: u64,
     pub chart_secs: u64,
@@ -108,7 +108,7 @@ impl Default for Refresh {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub default_mode: Mode,
     pub network: Network,
@@ -205,17 +205,29 @@ impl Paths {
         Ok(p)
     }
     pub fn load_config(&self) -> Result<(Config, bool)> {
-        if !self.config.exists() {
-            return Ok((Config::default(), true));
-        }
-        let s = std::fs::read_to_string(&self.config)?;
-        let c: Config = toml::from_str(&s).map_err(|_| {
-            anyhow::anyhow!(
-                "config.toml 格式错误，请检查 TOML 语法（具体内容已隐藏，避免泄露凭据）"
-            )
+        let first = if !self.config.exists() {
+            crate::storage::create_settings(
+                &self.config,
+                toml::to_string_pretty(&Config::default())?.as_bytes(),
+            )?
+        } else {
+            false
+        };
+        let s = std::fs::read_to_string(&self.config).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                anyhow::anyhow!(crate::storage::settings_error(&self.config))
+            } else {
+                anyhow::Error::new(e).context(format!(
+                    "无法读取配置文件 {}，请检查文件权限",
+                    self.config.display()
+                ))
+            }
         })?;
-        c.validate()?;
-        Ok((c, false))
+        let c: Config = toml::from_str(&s)
+            .map_err(|_| anyhow::anyhow!(crate::storage::settings_error(&self.config)))?;
+        c.validate()
+            .with_context(|| crate::storage::settings_error(&self.config))?;
+        Ok((c, first))
     }
     pub fn save_config(&self, c: &Config) -> Result<()> {
         c.validate()?;

@@ -41,14 +41,46 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     }
     result
 }
+/// First-run creation must not replace a file copied in by another process.
+pub fn create_settings(path: &Path, bytes: &[u8]) -> Result<bool> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(e) => return Err(e).with_context(|| format!("无法创建默认文件 {}", path.display())),
+    };
+    let result = file.write_all(bytes).and_then(|_| file.sync_all());
+    if result.is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+    }
+    result.with_context(|| format!("默认文件写入失败 {}", path.display()))?;
+    Ok(true)
+}
+pub fn settings_error(path: &Path) -> String {
+    format!(
+        "无法识别或校验配置文件 {}。原文件未修改；请先备份后修复，或删除此文件并重新启动，程序会自动创建默认文件。",
+        path.display()
+    )
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Group {
     pub id: u64,
     pub name: String,
     pub symbols: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct UserState {
     pub watchlist: Vec<String>,
     pub groups: Vec<Group>,
@@ -108,11 +140,13 @@ impl Default for UserState {
 impl UserState {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Ok(Self::default());
+            create_settings(path, &serde_json::to_vec_pretty(&Self::default())?)?;
         }
-        let s: Self = serde_json::from_slice(&std::fs::read(path)?)
-            .context("state.json 损坏；请先备份后修复，程序不会覆盖它")?;
-        s.validate()?;
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("无法读取个人设置 {}，请检查文件及权限", path.display()))?;
+        let s: Self =
+            serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!(settings_error(path)))?;
+        s.validate().with_context(|| settings_error(path))?;
         Ok(s)
     }
     pub fn save(&self, path: &Path) -> Result<()> {

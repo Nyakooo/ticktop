@@ -470,6 +470,7 @@ fn first_run_mode_save_does_not_persist_temporary_cli_network_settings() {
 fn failed_modal_group_save_is_reported_and_can_be_retried() {
     let (_dir, mut app) = app();
     let state_path = app.paths.data.join("demo-state.json");
+    std::fs::remove_file(&state_path).unwrap();
     std::fs::create_dir(&state_path).unwrap();
     app.modal = Some(Modal::GroupName {
         id: None,
@@ -489,6 +490,7 @@ fn failed_modal_group_save_is_reported_and_can_be_retried() {
 fn failed_add_to_group_save_is_retried_without_losing_the_stock() {
     let (_dir, mut app) = app();
     let state_path = app.paths.data.join("demo-state.json");
+    std::fs::remove_file(&state_path).unwrap();
     std::fs::create_dir(&state_path).unwrap();
     let stock = app
         .catalog
@@ -1262,7 +1264,7 @@ fn pinning_manual_order_and_aliases_persist_without_cross_group_changes() {
     assert!(legacy.pinned.is_empty() && legacy.custom_aliases.is_empty());
 }
 #[test]
-fn watchlist_shortcuts_rename_and_minimal_alias_keep_code_visible() {
+fn watchlist_shortcuts_rename_and_minimal_alias_replace_code() {
     let (_dir, mut app) = app();
     let ids = app.user.watchlist.clone();
     app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL));
@@ -1277,11 +1279,9 @@ fn watchlist_shortcuts_rename_and_minimal_alias_keep_code_visible() {
     app.key(key(KeyCode::Enter));
     app.user.mode = Mode::Minimal;
     let text = screen(&app, 80, 24);
-    assert!(
-        text.contains("worker-1")
-            && text.contains(&format!("^{}", ids[0]))
-            && text.contains("alias")
-    );
+    assert!(text.contains("^worker-1") && text.contains("worker-1 /"));
+    assert!(!text.contains(&ids[0]));
+    assert!(text.contains(&ids[1]));
     app.key(key(KeyCode::Char('e')));
     app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
     app.key(key(KeyCode::Esc));
@@ -1302,4 +1302,74 @@ fn watchlist_shortcuts_rename_and_minimal_alias_keep_code_visible() {
     let saved = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
     assert_eq!(saved.alias(&ids[0]), "worker-1");
     assert_eq!(saved.groups[1].name, "观察清单");
+}
+
+#[test]
+fn default_settings_are_created_and_replaced_files_load_without_import() {
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let pa = Paths::resolve(Some(&a.path().to_path_buf())).unwrap();
+    let pb = Paths::resolve(Some(&b.path().to_path_buf())).unwrap();
+    let (mut config, first) = pa.load_config().unwrap();
+    assert!(first && pa.config.is_file());
+    assert!(!pa.load_config().unwrap().1);
+    config.default_mode = Mode::Minimal;
+    config.refresh.quotes_secs = 17;
+    pa.save_config(&config).unwrap();
+    let state_path = pa.data.join("state.json");
+    let mut state = UserState::load(&state_path).unwrap();
+    assert!(state_path.is_file());
+    let id = state.watchlist[0].clone();
+    state.set_alias(&id, "cpu0").unwrap();
+    state.toggle_pin(&id).unwrap();
+    state.rename_group(1, "随身观察").unwrap();
+    state.mode = Mode::Minimal;
+    state.save(&state_path).unwrap();
+    std::fs::copy(&pa.config, &pb.config).unwrap();
+    std::fs::copy(&state_path, pb.data.join("state.json")).unwrap();
+    let (loaded, first) = pb.load_config().unwrap();
+    assert!(!first && loaded.refresh.quotes_secs == 17);
+    let app = App::new(loaded, pb, false, false).unwrap();
+    assert_eq!(app.user.mode, Mode::Minimal);
+    assert_eq!(app.user.alias(&id), "cpu0");
+    assert!(app.user.is_pinned(&id));
+    assert_eq!(app.user.groups[0].name, "随身观察");
+    assert!(screen(&app, 100, 30).contains("cpu0"));
+}
+#[test]
+fn unknown_or_invalid_settings_explain_recovery_without_modifying_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::resolve(Some(&dir.path().to_path_buf())).unwrap();
+    for raw in [
+        b"unknown_setting = true".as_slice(),
+        b"[refresh]\nquotes_secs = 0",
+        b"\xff\xfe",
+    ] {
+        std::fs::write(&paths.config, raw).unwrap();
+        let error = format!("{:#}", paths.load_config().unwrap_err());
+        assert!(
+            error.contains(&paths.config.display().to_string())
+                && error.contains("删除")
+                && error.contains("未修改")
+        );
+        assert_eq!(std::fs::read(&paths.config).unwrap(), raw);
+    }
+    let state_path = paths.data.join("state.json");
+    for raw in [
+        r#"{"unknown_setting":true}"#,
+        r#"{"mode":"nonsense"}"#,
+        "not json",
+    ] {
+        std::fs::write(&state_path, raw).unwrap();
+        let error = format!("{:#}", UserState::load(&state_path).unwrap_err());
+        assert!(error.contains(&state_path.display().to_string()) && error.contains("删除"));
+        assert_eq!(std::fs::read_to_string(&state_path).unwrap(), raw);
+    }
+    std::fs::remove_file(&paths.config).unwrap();
+    std::fs::remove_file(&state_path).unwrap();
+    paths.load_config().unwrap();
+    UserState::load(&state_path).unwrap();
+    assert!(paths.config.is_file() && state_path.is_file());
+    assert!(!ticktop::storage::create_settings(&state_path, b"replacement").unwrap());
+    assert!(UserState::load(&state_path).is_ok());
 }

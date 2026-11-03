@@ -106,6 +106,7 @@ impl App {
         let mut user = UserState::load(&state_path)?;
         if !has_saved_state {
             user.mode = config.default_mode;
+            user.save(&state_path)?;
         }
         let welcome = first && !has_saved_state;
         let welcome_selection = usize::from(user.mode == Mode::Minimal);

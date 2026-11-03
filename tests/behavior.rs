@@ -951,7 +951,8 @@ fn etf_detail_and_minimal_mode_keep_third_decimal_and_no_chip_model() {
     app.user.mode = Mode::Full;
     let full = screen(&app, 160, 42);
     assert!(full.contains("4.065"));
-    assert!(!full.contains("筹码峰"));
+    assert!(full.contains("筹码峰：ETF 暂不支持"));
+    assert!(!full.contains("筹码峰 · 估算"));
     assert!(!full.contains("筹码估算 加载中"));
     app.user.mode = Mode::Minimal;
     assert!(screen(&app, 160, 42).contains("4.065"));
@@ -1391,4 +1392,27 @@ fn stock_chips_remain_visible_in_all_chart_periods_and_narrow_windows() {
             assert!(!rendered.contains("▇"), "chip bars must remain thin lines");
         }
     }
+}
+
+#[test]
+fn index_chip_status_is_explicit_and_switching_to_stock_keeps_its_chips() {
+    let (_dir, mut app) = app();
+    app.on_market(MarketEvent::Chips(ticktop::chips::demo("sz300750")));
+    app.user.add("sh000001", 0).unwrap();
+    app.user.selected = Some("sh000001".into());
+    app.on_market(MarketEvent::Chart(market::demo_history(
+        "sh000001",
+        Period::Intraday,
+    )));
+    let index = screen(&app, 250, 70);
+    assert!(index.contains("筹码峰：指数不适用"));
+    assert!(!index.contains("筹码峰 · 估算"));
+    app.user.selected = Some("sz300750".into());
+    app.on_market(MarketEvent::Chart(market::demo_history(
+        "sz300750",
+        Period::Intraday,
+    )));
+    let stock = screen(&app, 250, 70);
+    assert!(stock.contains("筹码峰 · 估算"));
+    assert!(!stock.contains("指数不适用"));
 }

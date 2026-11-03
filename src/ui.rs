@@ -524,9 +524,14 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             p.change(q.percent()),
         ));
     }
-    let metrics = q
+    let mut metrics = q
         .map(quote_metrics)
         .unwrap_or_else(|| "量比 --  换手率 --".into());
+    if crate::instruments::is_index(id) {
+        metrics.push_str(" · 筹码峰：指数不适用");
+    } else if crate::instruments::is_etf(id) {
+        metrics.push_str(" · 筹码峰：ETF 暂不支持");
+    }
     f.render_widget(
         Paragraph::new(vec![
             Line::from(quote),

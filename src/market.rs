@@ -30,9 +30,11 @@ pub enum Kind {
     Catalog,
     Chips,
     Sectors,
+    Turnover,
 }
 pub enum MarketEvent {
     Quotes(Vec<Quote>),
+    Turnover(Option<crate::turnover::Comparison>),
     Chart(Series),
     Catalog(Catalog),
     Chips(crate::chips::Distribution),
@@ -403,6 +405,7 @@ fn same_job(a: &Request, b: &Request, kind: Kind) -> bool {
                     && a.config.refresh.chart_secs == b.config.refresh.chart_secs
             }
             Kind::Catalog => true,
+            Kind::Turnover => a.config.refresh.quotes_secs == b.config.refresh.quotes_secs,
             Kind::Chips => a.focus == b.focus && a.heatmap_enabled == b.heatmap_enabled,
             Kind::Sectors => {
                 a.heatmap_enabled == b.heatmap_enabled
@@ -418,6 +421,7 @@ pub fn spawn_workers(rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>
         Kind::Catalog,
         Kind::Sectors,
         Kind::Chips,
+        Kind::Turnover,
     ] {
         tokio::spawn(worker(rx.clone(), tx.clone(), kind));
     }
@@ -471,6 +475,7 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             if job.demo {
                 return Ok(match kind {
                     Kind::Quotes => MarketEvent::Quotes(demo_quotes(&job.symbols)),
+                    Kind::Turnover => MarketEvent::Turnover(None),
                     Kind::Chart => MarketEvent::Chart(demo_history(
                         job.focus.as_deref().unwrap_or("sz300750"),
                         job.period,
@@ -487,6 +492,7 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             let h = http.as_ref().context("invalid network configuration")?;
             Ok(match kind {
                 Kind::Quotes => MarketEvent::Quotes(quotes(h, &job.symbols).await?),
+                Kind::Turnover => MarketEvent::Turnover(crate::turnover::fetch(h).await?),
                 Kind::Chart => MarketEvent::Chart(
                     history(h, job.focus.as_deref().context("no selection")?, job.period).await?,
                 ),
@@ -523,6 +529,7 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
         };
         let base = match kind {
             Kind::Quotes => request.config.refresh.quotes_secs,
+            Kind::Turnover => request.config.refresh.quotes_secs.max(60),
             Kind::Chart => request.config.refresh.chart_secs,
             Kind::Catalog => 86400,
             Kind::Chips => 1800,

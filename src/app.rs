@@ -56,6 +56,8 @@ pub struct App {
     pub modal: Option<Modal>,
     pub message: String,
     pub quote_error: Option<String>,
+    pub turnover: Option<crate::turnover::Comparison>,
+    pending_turnover: Option<Option<crate::turnover::Comparison>>,
     pub chart_error: Option<String>,
     pub chip_error: Option<String>,
     pub chips: HashMap<String, crate::chips::Distribution>,
@@ -138,6 +140,8 @@ impl App {
             },
             message: String::new(),
             quote_error: None,
+            turnover: None,
+            pending_turnover: None,
             chart_error: None,
             chip_error: None,
             chips: HashMap::new(),
@@ -440,6 +444,13 @@ impl App {
                     self.quotes = merged;
                 }
             }
+            MarketEvent::Turnover(comparison) => {
+                if self.paused {
+                    self.pending_turnover = Some(comparison);
+                } else {
+                    self.turnover = comparison;
+                }
+            }
             MarketEvent::Chips(d) => {
                 self.chip_error = None;
                 if self.cache.write(&format!("chips:v1:{}", d.id), &d).is_err() {
@@ -505,6 +516,13 @@ impl App {
                 let msg = format!("{message} · {retry_secs}s 后重试");
                 match kind {
                     Kind::Quotes => self.quote_error = Some(msg),
+                    Kind::Turnover => {
+                        if self.paused {
+                            self.pending_turnover = Some(None);
+                        } else {
+                            self.turnover = None;
+                        }
+                    }
                     Kind::Chart => self.chart_error = Some(msg),
                     Kind::Chips => self.chip_error = Some(msg),
                     Kind::Sectors => self.sector_error = Some(msg),
@@ -521,6 +539,9 @@ impl App {
     fn toggle_pause(&mut self) {
         self.paused = !self.paused;
         if !self.paused {
+            if let Some(comparison) = self.pending_turnover.take() {
+                self.turnover = comparison;
+            }
             if let Some(quotes) = self.pending_quotes.take() {
                 self.quotes = quotes.into_iter().map(|q| (q.id.clone(), q)).collect();
             }

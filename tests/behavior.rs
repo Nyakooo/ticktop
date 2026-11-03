@@ -1161,3 +1161,48 @@ fn daily_candles_and_volume_render_and_cursor_pans_to_older_dates() {
     let state = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
     assert_eq!(state.period, Period::Day);
 }
+
+#[test]
+fn turnover_comparison_is_aligned_optional_and_respects_pause() {
+    let (_dir, mut app) = app();
+    let quotes = market::demo_quotes(&app.request().symbols);
+    let time = quotes
+        .iter()
+        .find(|q| q.id == "sh000002")
+        .unwrap()
+        .source_time;
+    app.on_market(MarketEvent::Quotes(quotes));
+    let comparison = ticktop::turnover::Comparison {
+        date: time.format("%Y%m%d").to_string(),
+        previous_date: "20261030".into(),
+        minute: time.format("%H:%M").to_string(),
+        current_fen: 12_000_000_000_000,
+        previous_fen: 10_000_000_000_000,
+        fetched_at: chrono::Utc::now(),
+    };
+    app.on_market(MarketEvent::Turnover(Some(comparison.clone())));
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for heat in [false, true] {
+            app.user.heatmap = heat;
+            assert!(screen(&app, 160, 42).contains("较昨同时放量 200.00亿"));
+        }
+    }
+    app.key(key(KeyCode::Char(' ')));
+    app.on_market(MarketEvent::Turnover(None));
+    assert!(app.turnover.is_some());
+    app.key(key(KeyCode::Char(' ')));
+    assert!(app.turnover.is_none());
+    let mut stale = comparison;
+    stale.date = "20200101".into();
+    app.on_market(MarketEvent::Turnover(Some(stale)));
+    let rendered = screen(&app, 160, 42);
+    assert!(!rendered.contains("较昨同时"));
+    assert!(rendered.contains("两市A股成交额"));
+    app.on_market(MarketEvent::Error {
+        kind: market::Kind::Turnover,
+        message: "unavailable".into(),
+        retry_secs: 60,
+    });
+    assert!(app.turnover.is_none() && app.quote_error.is_none());
+}

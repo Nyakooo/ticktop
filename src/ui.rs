@@ -218,8 +218,9 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         (Some(sh), Some(sz)) if sh.source_time.date_naive() == sz.source_time.date_naive() => {
             match (sh.amount_wan, sz.amount_wan) {
                 (Some(a), Some(b)) => format!(
-                    "两市A股成交额 {:.2}亿 · {} {}{}",
+                    "两市A股成交额 {:.2}亿{} · {} {}{}",
                     (a + b) / 10000.,
+                    turnover_comparison(app, sh, sz),
                     sh.source_time.format("%m-%d"),
                     sh.source_time.min(sz.source_time).format("%H:%M:%S"),
                     if sh.age_secs() > 120 || sz.age_secs() > 120 {
@@ -238,6 +239,39 @@ fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         Rect::new(r.x, r.y + 1, r.width, 1),
     );
     index_bar(f, app, r, p);
+}
+fn turnover_comparison(app: &App, sh: &Quote, sz: &Quote) -> String {
+    let Some(c) = &app.turnover else {
+        return String::new();
+    };
+    if c.date != sh.source_time.format("%Y%m%d").to_string()
+        || c.date != sz.source_time.format("%Y%m%d").to_string()
+    {
+        return String::new();
+    }
+    let Ok(time) =
+        chrono::NaiveDateTime::parse_from_str(&format!("{} {}", c.date, c.minute), "%Y%m%d %H:%M")
+    else {
+        return String::new();
+    };
+    let lag = (sh.source_time.min(sz.source_time).naive_local() - time).num_seconds();
+    if !(0..=180).contains(&lag)
+        || (!app.paused && (chrono::Utc::now() - c.fetched_at).num_seconds() > 180)
+    {
+        return String::new();
+    }
+    let delta = c.delta_yi();
+    // Below the displayed 0.01亿 precision, show unchanged rather than a signed zero.
+    let label = if delta.abs() < 0.005 {
+        "持平".into()
+    } else {
+        format!(
+            "{} {:.2}亿",
+            if delta > 0. { "放量" } else { "缩量" },
+            delta.abs()
+        )
+    };
+    format!(" · 较昨同时{label}（{}）", c.minute)
 }
 fn index_columns(app: &App, width: u16) -> usize {
     (width

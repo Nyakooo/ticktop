@@ -809,10 +809,9 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             crate::instruments::price(&s.id, selected_point.price)
         );
     }
-    let volume_height = if r.height >= 11 {
+    // Leave enough room for both a readable price plot and the volume bars.
+    let volume_height = if r.width >= 52 && r.height >= 14 {
         (r.height / 3).clamp(6, 8)
-    } else if r.height >= 8 {
-        3
     } else {
         0
     };

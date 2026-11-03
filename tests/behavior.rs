@@ -1139,6 +1139,15 @@ fn daily_candles_and_volume_render_and_cursor_pans_to_older_dates() {
     let rendered = screen(&app, 160, 42);
     assert!(rendered.contains("日 K") && rendered.contains("周 K") && rendered.contains("月 K"));
     assert!(rendered.contains("成交量 日 K"));
+    for (w, h) in [(160, 24), (80, 24), (46, 60)] {
+        let small = screen(&app, w, h);
+        assert!(
+            !small.contains("成交量 日 K"),
+            "volume panel must hide at {w}x{h}"
+        );
+        assert!(small.contains("日 K"));
+    }
+    assert!(screen(&app, 160, 42).contains("成交量 日 K"));
     assert!(!rendered.contains("2020-01-02"));
     app.key(key(KeyCode::Home));
     assert!(screen(&app, 160, 42).contains("2020-01-02"));

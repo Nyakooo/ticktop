@@ -1062,7 +1062,7 @@ fn volume_chart(
         .iter()
         .map(|(bar, color)| {
             Dataset::default()
-                .marker(Marker::HalfBlock)
+                .marker(Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(*color))
                 .data(bar)

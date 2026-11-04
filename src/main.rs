@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind},
+    event::{
+        DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
+        EventStream, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
+    },
     execute,
 };
 use futures_util::StreamExt;
@@ -65,8 +69,19 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::channel(32);
     market::spawn_workers(request_rx, event_tx);
     let mut terminal = ratatui::init();
-    let terminal_guard = TerminalGuard;
-    execute!(std::io::stdout(), EnableMouseCapture)?;
+    let mut terminal_guard = TerminalGuard { enhanced: false };
+    if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        execute!(
+            std::io::stdout(),
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        )?;
+        terminal_guard.enhanced = true;
+        app.key_releases = true;
+    }
+    execute!(std::io::stdout(), EnableMouseCapture, EnableFocusChange)?;
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let stop = terminate_signal();
@@ -77,7 +92,7 @@ async fn main() -> Result<()> {
             if app.dirty { let size = terminal.size()?; app.set_viewport(size.width, size.height); terminal.draw(|f|ui::draw(f,&app))?; app.dirty=false; }
             if app.request_dirty{request_tx.send_replace(app.request());app.request_dirty=false;}
             tokio::select! {
-                maybe=input.next()=>match maybe {Some(Ok(Event::Key(k))) if k.kind==KeyEventKind::Press||k.kind==KeyEventKind::Repeat=>app.key(k),Some(Ok(Event::Resize(..)))=>app.dirty=true,Some(Ok(Event::Mouse(mouse)))=>{let size=terminal.size()?;ui::mouse(&mut app,mouse,size.width,size.height);},Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},
+                maybe=input.next()=>match maybe {Some(Ok(Event::Key(k)))=>app.key(k),Some(Ok(Event::FocusLost))=>app.conceal_names(),Some(Ok(Event::Resize(..)))=>app.dirty=true,Some(Ok(Event::Mouse(mouse)))=>{let size=terminal.size()?;ui::mouse(&mut app,mouse,size.width,size.height);},Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},
                 event=event_rx.recv()=>if let Some(e)=event{app.on_market(e)},
                 _ = tick.tick() => {
                     if app.state_dirty {
@@ -97,10 +112,15 @@ async fn main() -> Result<()> {
 }
 // Install immediately after terminal initialization so early errors and panic
 // unwinding also disable mouse reporting and restore the terminal.
-struct TerminalGuard;
+struct TerminalGuard {
+    enhanced: bool,
+}
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        if self.enhanced {
+            let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+        }
+        let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange);
         ratatui::restore();
     }
 }

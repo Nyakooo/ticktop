@@ -171,7 +171,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "m 简约  h 自选行情   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  i 常驻  , 设置  ? 帮助  q 退出"
         }
     } else if app.user.mode == Mode::Minimal {
-        "m mode  t pin  Ctrl+↑↓ sort  e alias  g groups  / find  ?  q"
+        if app.key_releases {
+            "m mode  v hold:name  t pin  e alias  g groups  / find  ?  q"
+        } else {
+            "m mode  v toggle:name  t pin  e alias  g groups  / find  ?  q"
+        }
     } else {
         "m 简约  h 云图  t 置顶  Ctrl+↑↓ 排序  e 别名  g 分组  / 搜索  ←→ 周期  ? 帮助  q 退出"
     };
@@ -327,10 +331,7 @@ fn index_bar(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             continue;
         }
         let name = if app.user.mode == Mode::Minimal {
-            app.user
-                .custom_aliases
-                .get(id)
-                .map_or(id.as_str(), String::as_str)
+            app.minimal_label(id)
         } else {
             crate::instruments::INDICES
                 .iter()
@@ -1171,10 +1172,7 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 format!(
                     "{}{}",
                     if app.user.is_pinned(id) { "^" } else { "" },
-                    app.user
-                        .custom_aliases
-                        .get(id)
-                        .map_or(id.as_str(), String::as_str)
+                    app.minimal_label(id)
                 ),
                 q.map(|q| crate::instruments::price(&q.id, q.price))
                     .unwrap_or_else(|| "--".into()),
@@ -1209,7 +1207,7 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     );
     f.render_stateful_widget(table, areas[0], &mut state);
     let code = app.user.selected.clone().unwrap_or_default();
-    let label = app.user.custom_aliases.get(&code).unwrap_or(&code);
+    let label = app.minimal_label(&code);
     let mut samples = vec![format!("{label} / {}", app.user.period.label())];
     if let Some(q) = app.quotes.get(&code) {
         samples.push(quote_metrics(q));
@@ -1513,6 +1511,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "g 分组管理（n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序）",
                 "t 置顶/取消 · Ctrl+↑↓ 当前分组自选排序 · e 设置 alias",
                 "r 修改当前分组名称；全部自选不可重命名",
+                "简约模式 v 临时显示原名；支持释放事件时按住查看，否则再按还原",
                 ", 设置  i 常驻指数  Space 暂停显示  Esc 返回  q 退出",
                 "指数单位为点，ETF 保留三位小数；常驻栏 * 表示源报价超过120秒。",
                 "搜索输入中文/代码/拼音/首字母；Ctrl+a 加入分组",

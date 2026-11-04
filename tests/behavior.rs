@@ -1416,3 +1416,63 @@ fn index_chip_status_is_explicit_and_switching_to_stock_keeps_its_chips() {
     assert!(stock.contains("筹码峰 · 估算"));
     assert!(!stock.contains("指数不适用"));
 }
+
+#[test]
+fn minimal_name_peek_restores_alias_without_changing_saved_state() {
+    use crossterm::event::KeyEventKind;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.user.mode = Mode::Minimal;
+    app.key_releases = true;
+    let id = app.user.selected.clone().unwrap();
+    let name = app
+        .catalog
+        .iter()
+        .find(|s| s.id == id)
+        .unwrap()
+        .name
+        .clone();
+    app.user.set_alias(&id, "demo").unwrap();
+    let before = serde_json::to_string(&app.user).unwrap();
+    app.key(key(KeyCode::Char('v')));
+    assert_eq!(app.minimal_label(&id), name);
+    assert!(screen(&app, 120, 35).contains(&name));
+    app.key(KeyEvent::new_with_kind(
+        KeyCode::Char('v'),
+        KeyModifiers::NONE,
+        KeyEventKind::Repeat,
+    ));
+    assert!(app.reveal_names);
+    app.key(KeyEvent::new_with_kind(
+        KeyCode::Char('v'),
+        KeyModifiers::NONE,
+        KeyEventKind::Release,
+    ));
+    assert_eq!(app.minimal_label(&id), "demo");
+    assert_eq!(serde_json::to_string(&app.user).unwrap(), before);
+    app.key(key(KeyCode::Char('v')));
+    app.conceal_names();
+    assert!(!app.reveal_names);
+}
+
+#[test]
+fn minimal_name_peek_fallback_and_text_input_remain_usable() {
+    use crossterm::event::KeyEventKind;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.user.mode = Mode::Minimal;
+    app.key(key(KeyCode::Char('v')));
+    assert!(app.reveal_names);
+    app.key(KeyEvent::new_with_kind(
+        KeyCode::Char('v'),
+        KeyModifiers::NONE,
+        KeyEventKind::Repeat,
+    ));
+    assert!(app.reveal_names);
+    app.key(key(KeyCode::Char('v')));
+    assert!(!app.reveal_names);
+    app.key(key(KeyCode::Char('/')));
+    app.key(key(KeyCode::Char('v')));
+    assert!(matches!(&app.modal, Some(Modal::Search { query, .. }) if query == "v"));
+    assert!(!app.reveal_names);
+}

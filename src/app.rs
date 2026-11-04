@@ -6,7 +6,7 @@ use crate::{
     storage::{Cache, Catalog, UserState},
 };
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::collections::HashMap;
 
 pub enum Confirm {
@@ -79,6 +79,8 @@ pub struct App {
     pub request_dirty: bool,
     pub state_dirty: bool,
     pub chart_cursor: Option<usize>,
+    pub reveal_names: bool,
+    pub key_releases: bool,
     pending_quotes: Option<Vec<Quote>>,
     pending_charts: Vec<Series>,
     pending_sectors: HashMap<crate::sectors::Category, crate::sectors::Snapshot>,
@@ -164,6 +166,8 @@ impl App {
             request_dirty: true,
             state_dirty: false,
             chart_cursor: None,
+            reveal_names: false,
+            key_releases: false,
             pending_quotes: None,
             pending_charts: Vec::new(),
             pending_sectors: HashMap::new(),
@@ -590,7 +594,46 @@ impl App {
             _ => false,
         }
     }
+    pub fn minimal_label<'a>(&'a self, id: &'a str) -> &'a str {
+        if self.reveal_names {
+            self.catalog
+                .iter()
+                .find(|stock| stock.id == id)
+                .map_or(id, |stock| stock.name.as_str())
+        } else {
+            self.user.custom_aliases.get(id).map_or(id, String::as_str)
+        }
+    }
+    pub fn conceal_names(&mut self) {
+        if self.reveal_names {
+            self.reveal_names = false;
+            self.dirty = true;
+        }
+    }
     pub fn key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Char('v') && key.kind == KeyEventKind::Release {
+            if self.key_releases {
+                self.conceal_names();
+            }
+            return;
+        }
+        if key.kind == KeyEventKind::Release {
+            return;
+        }
+        if self.modal.is_none()
+            && self.user.mode == Mode::Minimal
+            && key.code == KeyCode::Char('v')
+            && key.modifiers.is_empty()
+        {
+            if self.key_releases {
+                self.reveal_names = true;
+            } else if key.kind == KeyEventKind::Press {
+                self.reveal_names = !self.reveal_names;
+            }
+            self.dirty = true;
+            return;
+        }
+        self.conceal_names();
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit = true;
             return;

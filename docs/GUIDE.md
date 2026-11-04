@@ -71,6 +71,7 @@ Shell 配置中的 `# >>> ticktop >>>` 区块可以手动移除。
 | `PgUp` / `PgDn`，`p` / `n` | 云图翻页（终端拦截翻页键时用 p/n）；`Home` / `End` 跳到首末板块 |
 | `↑` / `↓` | 选股；长列表和热力图自动滚动 / 翻页 |
 | `←` / `→` | 分时 / 日 K / 周 K / 月 K |
+| `v` | 简约模式临时查看原名；支持按键释放事件的终端按住查看、松开还原，否则按一次显示、再按还原；不修改别名配置 |
 | `j` / `k`，`Home` / `End` | 移动走势游标，查看对应价格 |
 | `/` | 搜索；支持中文 / 代码 / 拼音 / 首字母 / 小幅拼写错误 |
 | `Enter` | 搜索结果中预览股票；不会自动加入自选 |
@@ -246,7 +247,7 @@ Git Bash 也支持 README 中的 `curl ... | bash` 命令，自动调用 Windows
 
 ```powershell
 $env:TICKTOP_INSTALL_DIR = 'C:\Tools\Ticktop'
-$env:TICKTOP_VERSION = 'v0.4.0'
+$env:TICKTOP_VERSION = 'v0.4.1'
 irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
 ```
 

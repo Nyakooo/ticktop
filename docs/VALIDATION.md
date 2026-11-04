@@ -171,3 +171,20 @@ Release review: Standards axis found one terminal-lifecycle cleanup issue; fixed
 - 未知字段、格式错误、无效配置与编码异常均提供文件路径及备份/修复/删除后重建指引，不自动删除或覆盖原文件；解析错误不回显配置凭据。
 - 通过复制两文件到另一套默认平台目录、不传 --data-dir 的真实终端测试，确认启动自动恢复 alias、置顶、模式等状态；删除文件后自动重建。
 - 简约模式设置 alias 后列表、选中摘要及常驻指数以别名替代代码；未设置时保留代码。常规测试、Clippy 与终端模式持久化检查通过。
+
+
+## 独立指数与美股页面（本地验证）
+
+- `cargo test --locked`：海外源解析、阶段与前收基准、夏令时源区间、缺失值/损坏响应拒绝、夜盘精确代码匹配、别名与订阅分组、页面/周期独立保存、暂停恢复、窄窗口及鼠标导航。
+- `cargo test --test overseas live_foreign_quotes_periods_and_optional_night -- --ignored --nocapture`：实际请求日经225、KOSPI、纳斯达克综合、标普500及 AAPL/NVDA/TSLA，验证分钟行情；另验证 AAPL 日/周/月 OHLC 和可选夜盘报价。夜盘历史曲线仍不提供。
+- `cargo run --example overseas_screens`：实际渲染器捕获完整/简约、宽/窄窗口，输出在 `target/overseas-preview/`，模拟数据与真实源验证分开。
+- `python3 scripts/market_smoke.py target/release/ticktop`：真实 PTY 覆盖 F2/F3、h 返回、周期、中文订阅、别名、时段及重启恢复；所有配置均使用隔离目录。
+- 两市收盘比较回归：15:00完整数据在三分钟后仍显示，网络失败/重启保留缓存，次日报价不会显示上一日的比较。
+- Windows 更新后命令丢失问题按用户要求暂缓；此次未修改安装器或自更新流程。
+
+
+### F2 总览回归
+
+- 13项跨源目录、中文/拼音/代码搜索、关注增删、置顶排序、别名隐藏代码、空关注恢复全部目录、旧状态默认迁移与重启恢复均有回归测试。
+- `cargo test --test overseas live_index_directory_quotes_and_domestic_history -- --ignored --nocapture`：国内及恒生9项批量报价全部返回，上证/恒生分时与日 K 转换通过；四项海外指数的轻量报价接口通过。
+- 关注管理与 F1 的自选及 F3 订阅隔离；`scripts/market_smoke.py` 新增真实 PTY 的指数搜索、关注、置顶、Enter/Esc 和重启保存检查。

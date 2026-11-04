@@ -17,15 +17,15 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy)]
-struct Palette {
-    fg: Color,
-    dim: Color,
-    line: Color,
-    accent: Color,
-    up: Color,
-    down: Color,
-    bg: Color,
-    selected: Color,
+pub(crate) struct Palette {
+    pub(crate) fg: Color,
+    pub(crate) dim: Color,
+    pub(crate) line: Color,
+    pub(crate) accent: Color,
+    pub(crate) up: Color,
+    pub(crate) down: Color,
+    pub(crate) bg: Color,
+    pub(crate) selected: Color,
 }
 impl Palette {
     fn new(mode: Mode) -> Self {
@@ -53,7 +53,7 @@ impl Palette {
             selected: Color::Rgb(31, 46, 49),
         }
     }
-    fn change(self, v: f64) -> Color {
+    pub(crate) fn change(self, v: f64) -> Color {
         if v > 0.0 {
             self.up
         } else if v < 0.0 {
@@ -63,7 +63,7 @@ impl Palette {
         }
     }
 }
-fn text(s: impl Into<String>, color: Color) -> Span<'static> {
+pub(crate) fn text(s: impl Into<String>, color: Color) -> Span<'static> {
     Span::styled(s.into(), Style::default().fg(color))
 }
 fn block(title: impl Into<String>, p: Palette) -> Block<'static> {
@@ -98,12 +98,38 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     let outer = outer_layout(area, app);
     header(frame, app, outer[0], p);
-    if app.user.heatmap {
+    crate::overseas_ui::nav(frame, app, outer[5], p);
+    let overseas = matches!(
+        app.page(),
+        crate::overseas::Page::Indices | crate::overseas::Page::Us
+    );
+    if app.page() == crate::overseas::Page::Indices {
+        crate::overseas_ui::index_tabs(frame, app, outer[1], p);
+    } else if overseas {
+        let label = if app.page() == crate::overseas::Page::Indices {
+            "全球指数 · 亚洲 / 美国".to_string()
+        } else {
+            let state = &app.user.overseas;
+            let group = state
+                .groups
+                .iter()
+                .find(|g| g.id == state.group)
+                .map(|g| g.name.as_str())
+                .unwrap_or("全部订阅");
+            format!("{group}   {} · Tab 切时段", state.session.label())
+        };
+        frame.render_widget(
+            Paragraph::new(label).style(Style::default().fg(p.dim)),
+            outer[1],
+        );
+    } else if app.user.heatmap {
         cloud_tabs(frame, app, outer[1], p);
     } else {
         groups(frame, app, outer[1], p);
     }
-    if app.user.heatmap {
+    if overseas {
+        crate::overseas_ui::draw(frame, app, outer[2], p);
+    } else if app.user.heatmap {
         heatmap(frame, app, outer[2], p)
     } else if app.user.mode == Mode::Minimal {
         minimal(frame, app, outer[2], p)
@@ -118,6 +144,36 @@ pub fn draw(frame: &mut Frame, app: &App) {
         } else {
             "显示已暂停 · 后台继续更新，Space 恢复最新数据".into()
         }
+    } else if overseas && app.user.mode == Mode::Minimal {
+        if app.overseas_error.is_some() {
+            "E04 / cached".into()
+        } else if app.night_error.is_some() {
+            "E05 / cached".into()
+        } else if app.demo {
+            "sample".into()
+        } else {
+            format!(
+                "q={}s n={}s",
+                app.config
+                    .refresh
+                    .quotes_secs
+                    .max(app.config.refresh.chart_secs)
+                    .max(30),
+                app.config.refresh.quotes_secs.max(60)
+            )
+        }
+    } else if overseas {
+        app.overseas_error
+            .as_ref()
+            .or(app.night_error.as_ref())
+            .cloned()
+            .unwrap_or_else(|| {
+                if app.demo {
+                    "演示数据".into()
+                } else {
+                    "Yahoo 公开行情 · 时间统一北京时间 · 非保证实时 · 缺失数据保留空白".into()
+                }
+            })
     } else if app.user.heatmap {
         if app.user.mode == Mode::Minimal {
             if app.sector_error.is_some() {
@@ -164,11 +220,19 @@ pub fn draw(frame: &mut Frame, app: &App) {
             .wrap(Wrap { trim: true }),
         outer[3],
     );
-    let keys = if app.user.heatmap {
-        if app.user.mode == Mode::Minimal {
-            "m mode  h table     Tab type  n/p page  s sort  mouse  i index  i index  , cfg  ?  q"
+    let keys = if app.page() == crate::overseas::Page::Indices {
+        if app.user.overseas.index_detail {
+            "m 简约  h 云图  Esc 总览  j/k 选择  ←→ 周期  Shift+←→ 游标  ? 帮助  q 退出"
         } else {
-            "m 简约  h 自选行情   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  i 常驻  , 设置  ? 帮助  q 退出"
+            "m 简约  h 云图  j/k 选择  Enter 走势  a 添加  d 移除  t 置顶  Ctrl+↑↓ 排序  e 别名  ?  q"
+        }
+    } else if overseas {
+        "m 简约  h 云图  j/k 选择  ←→ 周期  Tab 时段  a 订阅  e 别名  g 分组  ? 帮助  q 退出"
+    } else if app.user.heatmap {
+        if app.user.mode == Mode::Minimal {
+            "m mode  h back     Tab type  n/p page  s sort  mouse  i index  i index  , cfg  ?  q"
+        } else {
+            "m 简约  h 返回前页   Tab 分类  s 排序  PgUp/PgDn 或 n/p 翻页  鼠标点击/滚轮  i 常驻  , 设置  ? 帮助  q 退出"
         }
     } else if app.user.mode == Mode::Minimal {
         if app.key_releases {
@@ -189,6 +253,25 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 fn header(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let quiet = app.user.mode == Mode::Minimal;
+    if matches!(
+        app.page(),
+        crate::overseas::Page::Indices | crate::overseas::Page::Us
+    ) {
+        f.render_widget(
+            Paragraph::new(if quiet && app.page() == crate::overseas::Page::Indices {
+                "metrics --index".to_string()
+            } else {
+                format!(
+                    "ticktop_   {} · 只看盘{}",
+                    app.page().label(),
+                    if app.demo { " · 演示数据" } else { "" }
+                )
+            })
+            .style(Style::default().fg(p.accent)),
+            r,
+        );
+        return;
+    }
     let spans = vec![
         text(if quiet { "metrics --watch" } else { "ticktop_" }, p.accent),
         text(
@@ -259,8 +342,10 @@ fn turnover_comparison(app: &App, sh: &Quote, sz: &Quote) -> String {
         return String::new();
     };
     let lag = (sh.source_time.min(sz.source_time).naive_local() - time).num_seconds();
-    if !(0..=180).contains(&lag)
-        || (!app.paused && (chrono::Utc::now() - c.fetched_at).num_seconds() > 180)
+    let closed = c.minute == "15:00" && lag >= 0;
+    if !closed
+        && (!(0..=180).contains(&lag)
+            || (!app.paused && (chrono::Utc::now() - c.fetched_at).num_seconds() > 180))
     {
         return String::new();
     }
@@ -275,7 +360,11 @@ fn turnover_comparison(app: &App, sh: &Quote, sz: &Quote) -> String {
             delta.abs()
         )
     };
-    format!(" · 较昨同时{label}（{}）", c.minute)
+    if closed {
+        format!(" · 较前日收盘{label}（15:00）")
+    } else {
+        format!(" · 较昨同时{label}（{}）", c.minute)
+    }
 }
 fn index_columns(app: &App, width: u16) -> usize {
     (width
@@ -690,7 +779,7 @@ fn chip_panel(f: &mut Frame, app: &App, r: Rect, p: Palette) {
 }
 // Use instrument tick units and evenly spaced ticks: Ratatui positions axis labels uniformly.
 // Rounding arbitrary floats only at display time can produce misleading/repeated labels.
-fn price_scale(
+pub(crate) fn price_scale(
     min: crate::model::Price,
     max: crate::model::Price,
     height: u16,
@@ -1160,6 +1249,24 @@ fn volume_chart(
         areas[1],
     );
 }
+pub(crate) fn compact_name_width(longest: usize, available: u16, reserved: u16) -> u16 {
+    (longest.clamp(8, 26) as u16).min(available.saturating_sub(reserved).max(1))
+}
+pub(crate) fn compact_table_area(area: Rect, widths: &[Constraint]) -> Rect {
+    let Some(width) = widths.iter().try_fold(0u16, |sum, c| match c {
+        Constraint::Length(n) => sum.checked_add(*n),
+        _ => None,
+    }) else {
+        return area;
+    };
+    Rect::new(
+        area.x,
+        area.y,
+        area.width
+            .min(width.saturating_add(widths.len().saturating_sub(1) as u16)),
+        area.height,
+    )
+}
 fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let areas = Layout::vertical([Constraint::Min(4), Constraint::Length(5)]).split(r);
     let ids = app.visible();
@@ -1188,16 +1295,23 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             Row::new(cells)
         })
         .collect::<Vec<_>>();
+    let longest = ids
+        .iter()
+        .map(|id| app.minimal_label(id).width() + usize::from(app.user.is_pinned(id)))
+        .max()
+        .unwrap_or(8);
+    let name_width = compact_name_width(longest, r.width, if show_age { 32 } else { 23 });
     let mut widths = vec![
-        Constraint::Length(14),
+        Constraint::Length(name_width),
         Constraint::Length(12),
-        Constraint::Min(7),
+        Constraint::Length(9),
     ];
     let mut headers = vec!["item", "value", "delta%"];
     if show_age {
         widths.push(Constraint::Length(8));
         headers.push("age(s)");
     }
+    let table_area = compact_table_area(areas[0], &widths);
     let table = Table::new(rows, widths)
         .header(Row::new(headers).style(Style::default().fg(p.dim)))
         .row_highlight_style(Style::default().bg(p.selected));
@@ -1205,7 +1319,7 @@ fn minimal(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         ids.iter()
             .position(|id| Some(id) == app.user.selected.as_ref()),
     );
-    f.render_stateful_widget(table, areas[0], &mut state);
+    f.render_stateful_widget(table, table_area, &mut state);
     let code = app.user.selected.clone().unwrap_or_default();
     let label = app.minimal_label(&code);
     let mut samples = vec![format!("{label} / {}", app.user.period.label())];
@@ -1457,6 +1571,8 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         r,
     );
     let title = match modal {
+        Modal::IndexSearch { .. } => "添加指数 · 中文 / 代码 / 拼音",
+        Modal::OverseasInput { purpose, .. } => purpose.label(),
         Modal::Welcome(_) => "首次启动",
         Modal::Help { .. } => "快捷键 / 编号映射",
         Modal::Search { adding: true, .. } => "添加自选 · 中文 / 代码 / 拼音",
@@ -1473,6 +1589,44 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
     let inner = b.inner(r);
     f.render_widget(b, r);
     match modal {
+        Modal::IndexSearch {
+            query,
+            results,
+            index,
+        } => {
+            let rows = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Min(1),
+                Constraint::Length(2),
+            ])
+            .split(inner);
+            draw_input(f, rows[0], query, p);
+            let items = results
+                .iter()
+                .map(|stock| {
+                    ListItem::new(format!(
+                        "{}  {}  {}  {}",
+                        stock.name,
+                        stock.id,
+                        crate::index_board::region(&stock.id),
+                        if app.user.overseas.index_watchlist.contains(&stock.id) {
+                            "已关注"
+                        } else {
+                            "+"
+                        }
+                    ))
+                })
+                .collect::<Vec<_>>();
+            f.render_stateful_widget(
+                List::new(items).highlight_style(Style::default().bg(p.selected)),
+                rows[1],
+                &mut ListState::default().with_selected((!results.is_empty()).then_some(*index)),
+            );
+            f.render_widget(Paragraph::new("↑↓ 选择 · Enter 加入关注 · Esc 取消\n内置目录提供代码与数据源，移除关注不会删除目录。").style(Style::default().fg(p.dim)),rows[2]);
+        }
+        Modal::OverseasInput { input, .. } => {
+            f.render_widget(Paragraph::new(format!("{input}▏\n\nEnter 保存 · Esc 取消 · Ctrl+u 清空\n美股：a 添加，g 选择/创建分组，G 加入分组，r 重命名\n常见名称：苹果、英伟达、特斯拉；其他股票输入代码")).wrap(Wrap{trim:false}),inner);
+        }
         Modal::Welcome(i) => {
             f.render_widget(
                 Paragraph::new(vec![
@@ -1505,7 +1659,12 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         Modal::Help { offset } => {
             let body = vec![
                 "↑↓ / PgUp/PgDn 滚动帮助；Esc 返回",
-                "m 完整/简约    h 行情/大盘云图    [ ] 自选分组",
+                "F1 自选 / F2 指数 / F3 美股 / F4 云图（可鼠标点击）",
+                "m 完整/简约 · h 云图/返回前页 · [ ] 当前市场分组",
+                "美股 Tab 切时段 · a / / 订阅 · g 分组选择/创建 · G 加入分组",
+                "美股 e 别名 · r 重命名分组 · d 移除（确认）",
+                "指数 Tab 我的关注/全部 · Enter 走势 · Esc 总览",
+                "指数 a 添加（中文/代码/拼音）· d 取消关注 · t 置顶 · Ctrl+↑↓ 排序",
                 "j/↓ 下一只 · k/↑ 上一只 · ←→ 周期 · Shift+←→ 游标",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
                 "g 分组管理（n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序）",
@@ -1705,6 +1864,9 @@ Esc 取消；别名不能与其他自选别名或编号重复",
         }
         Modal::Confirm(action) => {
             let msg = match action {
+                Confirm::OverseasRemove(id) => {
+                    format!("从当前美股分组移除 {id}？\n全部订阅中移除也会从其他分组取消订阅。")
+                }
                 Confirm::Remove(id) => format!(
                     "从 {} 移除 {}？\n{}",
                     app.user.group_name(),
@@ -1827,22 +1989,40 @@ pub fn redact_proxy(raw: &str) -> String {
 }
 
 fn outer_layout(area: Rect, app: &App) -> std::rc::Rc<[Rect]> {
-    Layout::default()
+    let overseas = matches!(
+        app.page(),
+        crate::overseas::Page::Indices | crate::overseas::Page::Us
+    );
+    let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(
+            Constraint::Length(if overseas {
+                1
+            } else {
                 index_rows(app, area.width.saturating_sub(2))
                     .saturating_add(2)
                     .max(2)
-                    .min(area.height.saturating_sub(13).max(2)),
-            ),
+                    .min(area.height.saturating_sub(13).max(2))
+            }),
             Constraint::Length(2),
             Constraint::Min(6),
             Constraint::Length(2),
             Constraint::Length(1),
         ])
         .margin(1)
-        .split(area)
+        .split(area);
+    let offset = if app.user.mode == Mode::Minimal {
+        16
+    } else {
+        11
+    };
+    let nav = Rect::new(
+        areas[0].x + offset,
+        areas[0].y,
+        areas[0].width.saturating_sub(offset),
+        1,
+    );
+    vec![areas[0], areas[1], areas[2], areas[3], areas[4], nav].into()
 }
 
 pub fn content_area(app: &App, width: u16, height: u16) -> Rect {
@@ -1859,6 +2039,46 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
     app.set_viewport(width, height);
     let outer = outer_layout(Rect::new(0, 0, width, height), app);
     let point = Position::new(event.column, event.row);
+    if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) && outer[5].contains(point) {
+        if let Some(index) = crate::overseas_ui::nav_hit(outer[5], point) {
+            app.key(KeyEvent::new(
+                KeyCode::F(index as u8 + 1),
+                KeyModifiers::NONE,
+            ));
+        }
+        return;
+    }
+    if matches!(
+        app.page(),
+        crate::overseas::Page::Indices | crate::overseas::Page::Us
+    ) {
+        if outer[2].contains(point) {
+            crate::overseas_ui::mouse(app, outer[2], point, event.kind);
+        } else if outer[1].contains(point)
+            && app.page() == crate::overseas::Page::Indices
+            && matches!(event.kind, MouseEventKind::Down(MouseButton::Left))
+        {
+            let x = point.x - outer[1].x;
+            if x < 36 && app.user.overseas.index_all != (x >= 18) {
+                app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            } else if x >= 38 && app.user.overseas.index_detail {
+                app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+            }
+        } else if outer[1].contains(point)
+            && app.page() == crate::overseas::Page::Us
+            && matches!(event.kind, MouseEventKind::Down(MouseButton::Left))
+        {
+            app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        } else if outer[4].contains(point)
+            && matches!(event.kind, MouseEventKind::Down(MouseButton::Left))
+        {
+            app.key(KeyEvent::new(
+                KeyCode::Char(if point.x - outer[4].x < 8 { 'm' } else { 'h' }),
+                KeyModifiers::NONE,
+            ));
+        }
+        return;
+    }
     let key = match event.kind {
         MouseEventKind::Moved if app.user.heatmap => {
             select_cloud_at(app, outer[2], point);

@@ -5,7 +5,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Comparison {
     pub date: String,
     pub previous_date: String,

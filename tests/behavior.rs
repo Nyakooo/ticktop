@@ -1533,3 +1533,319 @@ fn shifted_arrows_inspect_chart_without_switching_stock_or_period() {
     assert_ne!(app.user.period, period);
     assert_eq!(app.user.selected, selected);
 }
+
+#[test]
+fn closing_turnover_survives_stale_fetch_failure_and_restart() {
+    use chrono::{TimeZone, Utc};
+    let (_dir, mut app) = app();
+    let zone = chrono::FixedOffset::east_opt(28800).unwrap();
+    let mut quotes = market::demo_quotes(&["sh000002".into(), "sz399107".into()]);
+    for q in &mut quotes {
+        q.source_time = zone.with_ymd_and_hms(2026, 11, 3, 15, 10, 0).unwrap();
+    }
+    app.on_market(MarketEvent::Quotes(quotes));
+    app.on_market(MarketEvent::Turnover(Some(ticktop::turnover::Comparison {
+        date: "20261103".into(),
+        previous_date: "20261102".into(),
+        minute: "15:00".into(),
+        current_fen: 15_000_000_000_000,
+        previous_fen: 16_000_000_000_000,
+        fetched_at: Utc::now() - chrono::Duration::hours(4),
+    })));
+    assert!(screen(&app, 250, 50).contains("缩量"));
+    app.on_market(MarketEvent::Error {
+        kind: market::Kind::Turnover,
+        message: "offline".into(),
+        retry_secs: 60,
+    });
+    assert!(screen(&app, 250, 50).contains("缩量"));
+    let reopened = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+    assert!(screen(&reopened, 250, 50).contains("缩量"));
+    let mut next_day = market::demo_quotes(&["sh000002".into(), "sz399107".into()]);
+    for q in &mut next_day {
+        q.source_time = zone.with_ymd_and_hms(2026, 11, 4, 9, 35, 0).unwrap();
+    }
+    app.on_market(MarketEvent::Quotes(next_day));
+    assert!(!screen(&app, 250, 50).contains("较前日收盘"));
+}
+
+#[test]
+fn market_pages_keep_selections_periods_and_h_return_independent() {
+    use ticktop::overseas::{Page, Session};
+    let (_dir, mut app) = app();
+    app.modal = None;
+    let stock = app.user.selected.clone();
+    let period = app.user.period;
+    app.key(key(KeyCode::F(2)));
+    assert_eq!(app.page(), Page::Indices);
+    app.key(key(KeyCode::Char('j')));
+    assert_eq!(app.user.overseas.index_selected, "^KS11");
+    app.key(key(KeyCode::Enter));
+    app.key(key(KeyCode::Right));
+    assert_eq!(app.user.overseas.index_period, Period::Day);
+    app.key(key(KeyCode::Char('h')));
+    assert_eq!(app.page(), Page::Heatmap);
+    app.key(key(KeyCode::Char('h')));
+    assert_eq!(app.page(), Page::Indices);
+    app.key(key(KeyCode::F(3)));
+    app.key(key(KeyCode::Char('j')));
+    assert_eq!(app.user.overseas.us_selected.as_deref(), Some("NVDA"));
+    app.key(key(KeyCode::Tab));
+    assert_eq!(app.user.overseas.session, Session::Pre);
+    app.key(key(KeyCode::F(1)));
+    assert_eq!(app.user.selected, stock);
+    assert_eq!(app.user.period, period);
+    app.key(key(KeyCode::F(2)));
+    assert_eq!(app.user.overseas.index_selected, "^KS11");
+    assert_eq!(app.user.overseas.index_period, Period::Day);
+    app.persist().unwrap();
+    let restarted = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+    assert_eq!(restarted.page(), Page::Indices);
+    assert_eq!(restarted.user.overseas.us_selected.as_deref(), Some("NVDA"));
+    assert_eq!(
+        restarted.request().overseas.unwrap().focus.as_deref(),
+        Some("^KS11")
+    );
+    assert!(restarted.request().focus.is_none());
+}
+
+#[test]
+fn overseas_subscription_group_alias_pause_and_minimal_render() {
+    use ticktop::overseas::{self, Page, Session};
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.set_page(Page::Us);
+    fn input(app: &mut App, command: char, value: &str) {
+        app.key(key(KeyCode::Char(command)));
+        for ch in value.chars() {
+            app.key(key(KeyCode::Char(ch)));
+        }
+        app.key(key(KeyCode::Enter));
+    }
+    input(&mut app, 'a', "微软");
+    assert!(app.user.overseas.subscriptions.contains(&"MSFT".into()));
+    input(&mut app, 'G', "长期关注");
+    input(&mut app, 'g', "长期关注");
+    assert_eq!(app.user.overseas.visible(), ["MSFT"]);
+    input(&mut app, 'e', "office");
+    app.user.mode = Mode::Minimal;
+    app.on_market(MarketEvent::Overseas(
+        vec![overseas::demo("MSFT", Period::Intraday)],
+        vec![],
+    ));
+    let rendered = screen(&app, 120, 35);
+    assert!(rendered.contains("office"));
+    assert!(!rendered.contains("MSFT"));
+    app.key(key(KeyCode::Char('v')));
+    assert!(screen(&app, 120, 35).contains("微软"));
+    app.key(key(KeyCode::Char('v')));
+    app.key(key(KeyCode::Char(' ')));
+    let old = app.overseas_quote("MSFT").unwrap().price;
+    let mut update = overseas::demo("MSFT", Period::Intraday);
+    update.regular.price = 123.;
+    app.on_market(MarketEvent::Overseas(vec![update], vec![]));
+    assert_eq!(app.overseas_quote("MSFT").unwrap().price, old);
+    app.key(key(KeyCode::Char(' ')));
+    assert_eq!(app.overseas_quote("MSFT").unwrap().price, 123.);
+    app.user.overseas.session = Session::Overnight;
+    assert!(app.overseas_quote("MSFT").is_none());
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {
+            let s = screen(&app, w, h);
+            assert!(s.contains("F2"), "{w}x{h} {mode:?}\n{s}");
+        }
+    }
+    app.key(key(KeyCode::Char('d')));
+    app.key(key(KeyCode::Char('y')));
+    assert!(app.user.overseas.visible().is_empty());
+    assert!(app.user.overseas.subscriptions.contains(&"MSFT".into()));
+}
+
+#[test]
+fn foreign_cache_and_navigation_mouse_work_in_both_modes() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ticktop::overseas::{self, Page};
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.set_page(Page::Indices);
+    for period in Period::ALL {
+        app.on_market(MarketEvent::Overseas(
+            vec![overseas::demo("^N225", period)],
+            vec![],
+        ));
+    }
+    app.persist().unwrap();
+    let mut app = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+    assert!(app.overseas_series().is_some());
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {
+            for period in Period::ALL {
+                app.user.overseas.index_period = period;
+                let s = screen(&app, w, h);
+                assert!(s.contains("F2"), "{w}x{h} {mode:?}\n{s}");
+            }
+        }
+    }
+    app.user.mode = Mode::Full;
+    // Foreign pages have a one-line header at y=1; navigation shares that line.
+    ui::mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 90,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        160,
+        42,
+    );
+    assert_eq!(app.page(), Page::Indices); // Blank title space does not select a tab.
+    ui::mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 35,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        160,
+        42,
+    );
+    assert_eq!(app.page(), Page::Us);
+}
+
+#[test]
+fn index_overview_follow_search_detail_sort_alias_and_empty_state_persist() {
+    use ticktop::overseas::Page;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.set_page(Page::Indices);
+    let watchlist = app.user.watchlist.clone();
+    assert!(app.user.overseas.index_all);
+    assert!(!app.user.overseas.index_detail);
+    assert_eq!(app.request().overseas.unwrap().ids.len(), 13);
+    assert!(app.request().overseas.unwrap().focus.is_none());
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {
+            let s = screen(&app, w, h);
+            assert!(s.contains("F2"));
+            assert!(!s.contains("Shift+"));
+        }
+    }
+    app.user.mode = Mode::Full;
+    app.key(key(KeyCode::Char('a')));
+    for c in "沪深300".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    app.key(key(KeyCode::Enter));
+    assert!(!app.user.overseas.index_all);
+    assert!(
+        app.user
+            .overseas
+            .index_watchlist
+            .contains(&"sh000300".into())
+    );
+    assert_eq!(app.user.overseas.index_selected, "sh000300");
+    app.key(key(KeyCode::Char('t')));
+    assert_eq!(app.user.overseas.index_rows()[0], "sh000300");
+    app.key(key(KeyCode::Enter));
+    assert!(app.user.overseas.index_detail);
+    assert_eq!(
+        app.request().overseas.unwrap().focus.as_deref(),
+        Some("sh000300")
+    );
+    app.key(key(KeyCode::Esc));
+    assert!(!app.user.overseas.index_detail);
+    assert!(app.request().overseas.unwrap().focus.is_none());
+    app.key(key(KeyCode::Char('t')));
+    let previous = app.user.overseas.index_rows();
+    app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL));
+    assert_ne!(app.user.overseas.index_rows(), previous);
+    app.key(key(KeyCode::Char('e')));
+    for c in "work".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    app.key(key(KeyCode::Enter));
+    app.user.mode = Mode::Minimal;
+    let s = screen(&app, 160, 42);
+    assert!(s.contains("work"));
+    assert!(!s.contains("sh000300"));
+    app.persist().unwrap();
+    let restored = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+    assert_eq!(
+        restored.user.overseas.index_rows(),
+        app.user.overseas.index_rows()
+    );
+    assert_eq!(restored.user.overseas.aliases["sh000300"], "work");
+    assert_eq!(restored.user.watchlist, watchlist);
+    for id in app.user.overseas.index_watchlist.clone() {
+        app.user.overseas.index_selected = id;
+        app.key(key(KeyCode::Char('d')));
+    }
+    assert!(app.user.overseas.index_rows().is_empty());
+    assert!(app.user.overseas.selected().is_none());
+    assert!(screen(&app, 100, 30).contains("暂无关注"));
+    app.key(key(KeyCode::Tab));
+    assert_eq!(app.user.overseas.index_rows().len(), 13);
+    assert!(app.user.overseas.selected().is_some());
+}
+
+#[test]
+fn minimal_market_columns_stay_together_when_terminal_is_widened() {
+    use ticktop::overseas::{self, Page};
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.user.mode = Mode::Minimal;
+    app.on_market(MarketEvent::Quotes(market::demo_quotes(
+        &app.request().symbols,
+    )));
+    app.on_market(MarketEvent::Overseas(
+        vec![
+            overseas::demo("^N225", Period::Intraday),
+            overseas::demo("AAPL", Period::Intraday),
+        ],
+        vec![],
+    ));
+    for (page, id, price) in [
+        (Page::Watch, "sz300750", "268.50"),
+        (Page::Indices, "^N225", "62188.63"),
+        (Page::Us, "AAPL", "225.40"),
+    ] {
+        app.set_page(page);
+        let mut expected = None;
+        for width in [100, 160, 250] {
+            let rendered = screen(&app, width, 36);
+            let row = rendered
+                .lines()
+                .find(|line| line.contains(id) && line.contains(price))
+                .unwrap();
+            let position = row.find(price).unwrap();
+            assert!(position < 35, "{page:?} at {width}: {row}");
+            assert_eq!(
+                *expected.get_or_insert(position),
+                position,
+                "{page:?} columns stretch at {width}"
+            );
+            let y = rendered
+                .lines()
+                .position(|line| line.contains(id) && line.contains(price))
+                .unwrap() as u16;
+            let mut terminal = Terminal::new(TestBackend::new(width, 36)).unwrap();
+            terminal.draw(|f| ui::draw(f, &app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(
+                buffer[(width - 2, y)].bg,
+                buffer[(width - 1, 35)].bg,
+                "{page:?} highlight stretches into blank area"
+            );
+        }
+        // Very small windows and holding v for real Chinese names still render safely.
+        app.reveal_names = true;
+        let rendered = screen(&app, 46, 16);
+        assert!(rendered.contains("F2"));
+        app.reveal_names = false;
+    }
+}

@@ -10,10 +10,20 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::collections::HashMap;
 
 pub enum Confirm {
+    OverseasRemove(String),
     Remove(String),
     DeleteGroup(u64),
 }
 pub enum Modal {
+    IndexSearch {
+        query: String,
+        results: Vec<Instrument>,
+        index: usize,
+    },
+    OverseasInput {
+        purpose: crate::overseas_app::Input,
+        input: String,
+    },
     Welcome(usize),
     Help {
         offset: usize,
@@ -62,6 +72,13 @@ pub struct App {
     pub quote_error: Option<String>,
     pub turnover: Option<crate::turnover::Comparison>,
     pending_turnover: Option<Option<crate::turnover::Comparison>>,
+    pub overseas: HashMap<(String, Period), crate::overseas::Snapshot>,
+    pub nights: HashMap<String, crate::overseas::Quote>,
+    pub overseas_error: Option<String>,
+    pub night_error: Option<String>,
+    pub overseas_cursor: Option<usize>,
+    pending_overseas: Vec<crate::overseas::Snapshot>,
+    pending_nights: Vec<(String, crate::overseas::Quote)>,
     pub chart_error: Option<String>,
     pub chip_error: Option<String>,
     pub chips: HashMap<String, crate::chips::Distribution>,
@@ -129,6 +146,16 @@ impl App {
                 sectors.insert(category, snapshot);
             }
         }
+        if user.heatmap {
+            user.overseas.page = crate::overseas::Page::Heatmap;
+        }
+        let cached_overseas = cache
+            .read::<Vec<crate::overseas::Snapshot>>("overseas:v1")?
+            .unwrap_or_default();
+        let nights = cache
+            .read::<HashMap<String, crate::overseas::Quote>>("overnight:v1")?
+            .unwrap_or_default();
+        let turnover = cache.read::<crate::turnover::Comparison>("turnover:v1")?;
         let mut app = Self {
             saved_config: config.clone(),
             config,
@@ -147,7 +174,17 @@ impl App {
             },
             message: String::new(),
             quote_error: None,
-            turnover: None,
+            overseas: cached_overseas
+                .into_iter()
+                .map(|s| ((s.id.clone(), s.period), s))
+                .collect(),
+            nights,
+            overseas_error: None,
+            night_error: None,
+            overseas_cursor: None,
+            pending_overseas: vec![],
+            pending_nights: vec![],
+            turnover,
             pending_turnover: None,
             chart_error: None,
             chip_error: None,
@@ -180,6 +217,7 @@ impl App {
         if !self.config.pinned_indices.iter().any(|p| p == id) {
             return;
         }
+        self.set_page(crate::overseas::Page::Watch);
         self.user.selected = Some(id.into());
         self.user.heatmap = false;
         self.load_chart();
@@ -205,10 +243,38 @@ impl App {
                 symbols.push(id.to_string());
             }
         }
+        let page = self.page();
+        let overseas = match page {
+            crate::overseas::Page::Indices => Some(crate::overseas::Job {
+                ids: self.user.overseas.index_rows(),
+                focus: self
+                    .user
+                    .overseas
+                    .index_detail
+                    .then(|| self.user.overseas.selected().map(str::to_string))
+                    .flatten(),
+                period: if self.user.overseas.index_detail {
+                    self.user.overseas.index_period
+                } else {
+                    Period::Intraday
+                },
+                us: false,
+            }),
+            crate::overseas::Page::Us => Some(crate::overseas::Job {
+                ids: self.user.overseas.visible(),
+                focus: self.user.overseas.us_selected.clone(),
+                period: self.user.overseas.us_period,
+                us: true,
+            }),
+            _ => None,
+        };
         Request {
+            overseas,
             config: self.config.clone(),
             symbols,
-            focus: self.user.selected.clone(),
+            focus: (page == crate::overseas::Page::Watch)
+                .then(|| self.user.selected.clone())
+                .flatten(),
             period: self.user.period,
             demo: self.demo,
             catalog_as_of: self.catalog_as_of.clone(),
@@ -252,7 +318,7 @@ impl App {
             }
         }
     }
-    fn save_state_change(&mut self) -> bool {
+    pub(crate) fn save_state_change(&mut self) -> bool {
         self.state_dirty = true;
         self.flush_state()
     }
@@ -420,6 +486,66 @@ impl App {
     }
     pub fn on_market(&mut self, event: MarketEvent) {
         match event {
+            MarketEvent::Overseas(snapshots, missing) => {
+                self.overseas_error = if missing.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "{} 暂无新数据；保留源时间与旧值",
+                        missing.join(", ")
+                    ))
+                };
+                let mut merged = self.overseas.clone();
+                for mut s in snapshots {
+                    if s.bars.is_empty()
+                        && let Some(old) = merged.get(&(s.id.clone(), s.period))
+                    {
+                        s.bars = old.bars.clone();
+                        s.intervals = old.intervals.clone();
+                    }
+                    if merged
+                        .get(&(s.id.clone(), s.period))
+                        .is_none_or(|old| s.received_at >= old.received_at)
+                    {
+                        merged.insert((s.id.clone(), s.period), s.clone());
+                    }
+                    if self.paused {
+                        self.pending_overseas
+                            .retain(|old| old.id != s.id || old.period != s.period);
+                        self.pending_overseas.push(s);
+                    }
+                }
+                if self
+                    .cache
+                    .write("overseas:v1", &merged.values().collect::<Vec<_>>())
+                    .is_err()
+                {
+                    self.message = "海外缓存写入失败".into();
+                }
+                if !self.paused {
+                    self.overseas = merged;
+                }
+            }
+            MarketEvent::Overnight(id, quote) => {
+                self.night_error = quote
+                    .is_none()
+                    .then(|| "夜盘暂无新报价；不会使用盘后价替代".into());
+                if let Some(q) = quote {
+                    let mut all = self.nights.clone();
+                    if all.get(&id).is_none_or(|old| q.time >= old.time) {
+                        all.insert(id.clone(), q.clone());
+                    }
+                    if self.cache.write("overnight:v1", &all).is_err() {
+                        self.message = "夜盘缓存写入失败".into();
+                    }
+                    if self.paused {
+                        self.pending_nights.retain(|(s, _)| s != &id);
+                        self.pending_nights.push((id, q));
+                    } else {
+                        self.nights = all;
+                    }
+                }
+            }
             MarketEvent::Quotes(quotes) => {
                 let requested = self.request().symbols;
                 let returned: std::collections::HashSet<_> =
@@ -454,6 +580,17 @@ impl App {
                 }
             }
             MarketEvent::Turnover(comparison) => {
+                let comparison = comparison.or_else(|| {
+                    self.turnover
+                        .as_ref()
+                        .filter(|c| c.minute == "15:00")
+                        .cloned()
+                });
+                if let Some(c) = &comparison
+                    && self.cache.write("turnover:v1", c).is_err()
+                {
+                    self.message = "成交额比较缓存写入失败".into();
+                }
                 if self.paused {
                     self.pending_turnover = Some(comparison);
                 } else {
@@ -525,7 +662,12 @@ impl App {
                 let msg = format!("{message} · {retry_secs}s 后重试");
                 match kind {
                     Kind::Quotes => self.quote_error = Some(msg),
+                    Kind::Overseas => self.overseas_error = Some(msg),
+                    Kind::Overnight => self.night_error = Some(msg),
                     Kind::Turnover => {
+                        if self.turnover.as_ref().is_some_and(|c| c.minute == "15:00") {
+                            return;
+                        }
                         if self.paused {
                             self.pending_turnover = Some(None);
                         } else {
@@ -545,9 +687,13 @@ impl App {
             self.dirty = true;
         }
     }
-    fn toggle_pause(&mut self) {
+    pub(crate) fn toggle_pause(&mut self) {
         self.paused = !self.paused;
         if !self.paused {
+            for s in self.pending_overseas.drain(..) {
+                self.overseas.insert((s.id.clone(), s.period), s);
+            }
+            self.nights.extend(self.pending_nights.drain(..));
             if let Some(comparison) = self.pending_turnover.take() {
                 self.turnover = comparison;
             }
@@ -642,6 +788,34 @@ impl App {
         self.dirty = true;
         if let Some(modal) = self.modal.take() {
             self.handle_modal(modal, key);
+            return;
+        }
+        if let KeyCode::F(n @ 1..=4) = key.code {
+            self.set_page(
+                [
+                    crate::overseas::Page::Watch,
+                    crate::overseas::Page::Indices,
+                    crate::overseas::Page::Us,
+                    crate::overseas::Page::Heatmap,
+                ][n as usize - 1],
+            );
+            return;
+        }
+        if key.code == KeyCode::Char('h') {
+            let target = if self.page() == crate::overseas::Page::Heatmap {
+                self.user.overseas.return_page
+            } else {
+                crate::overseas::Page::Heatmap
+            };
+            self.set_page(target);
+            return;
+        }
+        if matches!(
+            self.page(),
+            crate::overseas::Page::Indices | crate::overseas::Page::Us
+        ) && key.code != KeyCode::Char('m')
+        {
+            self.overseas_key(key);
             return;
         }
         if self.user.heatmap && self.cloud_key(key.code) {
@@ -836,6 +1010,62 @@ impl App {
             return;
         }
         let next = match modal {
+            Modal::IndexSearch {
+                mut query,
+                mut results,
+                mut index,
+            } => {
+                match key.code {
+                    KeyCode::Up => index = index.saturating_sub(1),
+                    KeyCode::Down => index = (index + 1).min(results.len().saturating_sub(1)),
+                    KeyCode::Enter => {
+                        if let Some(stock) = results.get(index) {
+                            if let Err(error) = self.user.overseas.follow_index(&stock.id) {
+                                self.message = error.to_string();
+                            } else {
+                                self.user.overseas.index_all = false;
+                                self.user.overseas.index_detail = false;
+                                self.request_dirty = true;
+                                self.save_state_change();
+                                return;
+                            }
+                        }
+                    }
+                    _ => {
+                        if Self::input_char(&mut query, key) {
+                            results = crate::index_board::search(&query);
+                            if query.is_empty() {
+                                results = crate::index_board::catalog()
+                                    .into_iter()
+                                    .map(|(id, name)| Instrument {
+                                        id: id.into(),
+                                        name: name.into(),
+                                    })
+                                    .collect();
+                            }
+                            index = 0;
+                        }
+                    }
+                }
+                Some(Modal::IndexSearch {
+                    query,
+                    results,
+                    index,
+                })
+            }
+            Modal::OverseasInput { purpose, mut input } => {
+                if key.code == KeyCode::Enter {
+                    if let Err(e) = self.overseas_input(purpose, &input) {
+                        self.message = e.to_string();
+                        Some(Modal::OverseasInput { purpose, input })
+                    } else {
+                        None
+                    }
+                } else {
+                    Self::input_char(&mut input, key);
+                    Some(Modal::OverseasInput { purpose, input })
+                }
+            }
             Modal::Help { mut offset } => {
                 match key.code {
                     KeyCode::Char('?') => return,
@@ -1031,6 +1261,25 @@ impl App {
             Modal::Confirm(action) => {
                 if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) {
                     match action {
+                        Confirm::OverseasRemove(id) => {
+                            let state = &mut self.user.overseas;
+                            if state.group == 0 {
+                                state.subscriptions.retain(|s| s != &id);
+                                state.aliases.remove(&id);
+                                for g in &mut state.groups {
+                                    g.symbols.retain(|s| s != &id);
+                                }
+                            } else if let Some(g) =
+                                state.groups.iter_mut().find(|g| g.id == state.group)
+                            {
+                                g.symbols.retain(|s| s != &id);
+                            }
+                            state.ensure_selection();
+                            self.overseas_cursor = None;
+                            self.request_dirty = true;
+                            self.save_state_change();
+                            return;
+                        }
                         Confirm::Remove(id) => self.user.remove(&id),
                         Confirm::DeleteGroup(id) => self.user.delete_group(id),
                     }

@@ -5,24 +5,25 @@
 **在终端里看行情、管理自选、浏览板块云图。** 免费数据源，无需行情账号或 API Key，只看盘，不交易。
 
 - **自选分组**：中文、股票代码、拼音都能搜，把关注的股票分组保存。
-- **两种模式**：完整模式看走势与色块，简约模式看股票代码、板块名称和数字；自动记住上次选择。
+- **独立市场页**：自选、全球指数、美股、云图，`F1–F4` 随时切换。
+- **两种模式**：完整模式看走势，简约模式用紧凑数字与别名；自动记住上次选择。
 - **大盘云图**：行业 / 概念板块全量浏览，支持排序、翻页和鼠标查看详情。
 
-按 `/` 可搜索股票、ETF 或指数；按 `i` 配置顶部常驻指数，默认显示上证指数，设置自动保存。
+自选页按 `/` 可搜索股票、ETF 或指数；按 `i` 配置顶部常驻指数，默认显示上证指数，设置自动保存。
 
 个股详情新增**筹码峰（估算）**：完整模式看分布，简约模式看均价和成本区间。免费日线源可能不可用，计算口径见[使用指南](docs/GUIDE.md#筹码峰本地估算)。
 
 ## 下载与安装
 
-支持 **Windows 10/11 x64、Linux / macOS**，下载对应版本即可使用，无需安装 Rust。当前支持 A 股、沪深 ETF 和常用指数（含恒生指数）。
+支持 **Windows 10/11 x64、Linux / macOS**，下载对应版本即可使用，无需安装 Rust。支持 A 股、沪深 ETF、内地及香港／日韩／美国常用指数，以及美股订阅。夜盘目前只提供可获取的报价，不提供历史曲线。
 
 | 系统 | 芯片架构 | 下载 | 校验 |
 | --- | --- | --- | --- |
-| Windows | x86_64 / AMD64 | [下载 ZIP](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-x86_64-pc-windows-msvc.zip) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-x86_64-pc-windows-msvc.zip.sha256) |
-| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
-| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
-| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
-| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.4.2/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
+| Windows | x86_64 / AMD64 | [下载 ZIP](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-x86_64-pc-windows-msvc.zip) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-x86_64-pc-windows-msvc.zip.sha256) |
+| Linux | x86_64 / AMD64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-x86_64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-x86_64-unknown-linux-musl.tar.gz.sha256) |
+| Linux | ARM64 / AArch64 | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-aarch64-unknown-linux-musl.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-aarch64-unknown-linux-musl.tar.gz.sha256) |
+| macOS | Intel | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-x86_64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-x86_64-apple-darwin.tar.gz.sha256) |
+| macOS | Apple Silicon（M 系列） | [下载](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-aarch64-apple-darwin.tar.gz) | [SHA-256](https://github.com/Nyakooo/ticktop/releases/download/v0.5.0/ticktop-aarch64-apple-darwin.tar.gz.sha256) |
 
 Windows 解压后在 Windows Terminal / PowerShell 中运行 `.\ticktop.exe`；Linux / macOS 运行 `./ticktop`。
 
@@ -46,10 +47,13 @@ curl -fsSL https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/inst
 
 | 操作 | 按键 |
 | --- | --- |
+| 自选 / 指数 / 美股 / 云图 | `F1` / `F2` / `F3` / `F4` |
 | 搜索 / 添加自选 | `/` / `a` |
+| 指数关注 / 全部，走势 / 返回总览 | `Tab`，`Enter` / `Esc` |
+| 美股切交易时段 | `Tab` |
 | 管理 / 切换自选分组 | `g` / `[` `]` |
 | 切换完整 / 简约模式 | `m` |
-| 切换自选行情 / 大盘云图 | `h` |
+| 进入云图 / 返回前页 | `h` |
 | 云图切行业、概念 / 切排序 | `Tab` / `s` |
 | 云图翻页 | `PgUp` `PgDn`，或 `p` `n` |
 | 设置常驻指数 | `i` |

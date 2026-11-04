@@ -82,6 +82,7 @@ pub struct Group {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UserState {
+    pub overseas: crate::overseas::State,
     pub watchlist: Vec<String>,
     pub groups: Vec<Group>,
     pub aliases: BTreeMap<String, u64>,
@@ -110,6 +111,7 @@ impl Default for UserState {
             .map(|(i, s)| (s.clone(), i as u64 + 1))
             .collect();
         Self {
+            overseas: crate::overseas::State::default(),
             selected: watchlist.first().cloned(),
             watchlist: watchlist.clone(),
             groups: vec![
@@ -154,6 +156,7 @@ impl UserState {
         atomic_write(path, &serde_json::to_vec_pretty(self)?)
     }
     fn validate(&self) -> Result<()> {
+        self.overseas.validate()?;
         let mut seen = std::collections::HashSet::new();
         if self
             .watchlist

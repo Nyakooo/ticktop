@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, watch};
 pub const CATALOG_URL: &str = "https://www.cninfo.com.cn/new/data/szse_stock.json";
 #[derive(Clone, Debug)]
 pub struct Request {
+    pub overseas: Option<crate::overseas::Job>,
     pub config: Config,
     pub symbols: Vec<String>,
     pub focus: Option<String>,
@@ -31,8 +32,12 @@ pub enum Kind {
     Chips,
     Sectors,
     Turnover,
+    Overseas,
+    Overnight,
 }
 pub enum MarketEvent {
+    Overseas(Vec<crate::overseas::Snapshot>, Vec<String>),
+    Overnight(String, Option<crate::overseas::Quote>),
     Quotes(Vec<Quote>),
     Turnover(Option<crate::turnover::Comparison>),
     Chart(Series),
@@ -404,6 +409,11 @@ fn same_job(a: &Request, b: &Request, kind: Kind) -> bool {
                     && a.period == b.period
                     && a.config.refresh.chart_secs == b.config.refresh.chart_secs
             }
+            Kind::Overseas | Kind::Overnight => {
+                a.overseas == b.overseas
+                    && a.config.refresh.quotes_secs == b.config.refresh.quotes_secs
+                    && a.config.refresh.chart_secs == b.config.refresh.chart_secs
+            }
             Kind::Catalog => true,
             Kind::Turnover => a.config.refresh.quotes_secs == b.config.refresh.quotes_secs,
             Kind::Chips => a.focus == b.focus && a.heatmap_enabled == b.heatmap_enabled,
@@ -422,6 +432,8 @@ pub fn spawn_workers(rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>
         Kind::Sectors,
         Kind::Chips,
         Kind::Turnover,
+        Kind::Overseas,
+        Kind::Overnight,
     ] {
         tokio::spawn(worker(rx.clone(), tx.clone(), kind));
     }
@@ -476,6 +488,32 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                 return Ok(match kind {
                     Kind::Quotes => MarketEvent::Quotes(demo_quotes(&job.symbols)),
                     Kind::Turnover => MarketEvent::Turnover(None),
+                    Kind::Overseas => {
+                        let j = job.overseas.as_ref().context("no overseas page")?;
+                        MarketEvent::Overseas(
+                            j.ids
+                                .iter()
+                                .map(|id| {
+                                    crate::overseas::demo(
+                                        id,
+                                        if j.focus.as_ref() == Some(id) {
+                                            j.period
+                                        } else {
+                                            Period::Intraday
+                                        },
+                                    )
+                                })
+                                .collect(),
+                            vec![],
+                        )
+                    }
+                    Kind::Overnight => MarketEvent::Overnight(
+                        job.overseas
+                            .as_ref()
+                            .and_then(|j| j.focus.clone())
+                            .context("no focus")?,
+                        None,
+                    ),
                     Kind::Chart => MarketEvent::Chart(demo_history(
                         job.focus.as_deref().unwrap_or("sz300750"),
                         job.period,
@@ -491,6 +529,86 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             }
             let h = http.as_ref().context("invalid network configuration")?;
             Ok(match kind {
+                Kind::Overseas => {
+                    use futures_util::{StreamExt, stream};
+                    let j = job.overseas.as_ref().context("no overseas page")?;
+                    let mut tasks = j
+                        .ids
+                        .iter()
+                        .filter(|id| !crate::instruments::is_index(id))
+                        .map(|id| (id.clone(), Period::Intraday))
+                        .collect::<Vec<_>>();
+                    if j.period != Period::Intraday
+                        && let Some(id) = &j.focus
+                        && !crate::instruments::is_index(id)
+                    {
+                        tasks.push((id.clone(), j.period));
+                    }
+                    let results = stream::iter(tasks.into_iter().map(|(id, period)| {
+                        let h = h.clone();
+                        let quote_only = !j.us && j.focus.as_ref() != Some(&id);
+                        async move {
+                            let result = if quote_only {
+                                crate::overseas::fetch_index_quote(&h, &id).await
+                            } else {
+                                crate::overseas::fetch_chart(&h, &id, period).await
+                            };
+                            (id, result)
+                        }
+                    }))
+                    .buffer_unordered(3)
+                    .collect::<Vec<_>>()
+                    .await;
+                    let mut snapshots = vec![];
+                    let mut errors = vec![];
+                    for (id, result) in results {
+                        match result {
+                            Ok(s) => snapshots.push(s),
+                            Err(_) => errors.push(id),
+                        }
+                    }
+                    let domestic = j
+                        .ids
+                        .iter()
+                        .filter(|id| crate::instruments::is_index(id))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if !domestic.is_empty() {
+                        match quotes(h, &domestic).await {
+                            Ok(quotes) => {
+                                for id in &domestic {
+                                    if !quotes.iter().any(|q| q.id == *id) {
+                                        errors.push(id.clone());
+                                    }
+                                }
+                                for quote in quotes {
+                                    snapshots.push(crate::index_board::snapshot(&quote, None)?);
+                                    if j.focus.as_ref() == Some(&quote.id) {
+                                        match history(h, &quote.id, j.period).await.and_then(|s| {
+                                            crate::index_board::snapshot(&quote, Some(&s))
+                                        }) {
+                                            Ok(s) => snapshots.push(s),
+                                            Err(_) => errors.push(quote.id.clone()),
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => errors.extend(domestic),
+                        }
+                    }
+                    if snapshots.is_empty() {
+                        bail!("foreign data unavailable");
+                    }
+                    MarketEvent::Overseas(snapshots, errors)
+                }
+                Kind::Overnight => {
+                    let id = job
+                        .overseas
+                        .as_ref()
+                        .and_then(|j| j.focus.as_deref())
+                        .context("no focus")?;
+                    MarketEvent::Overnight(id.into(), crate::overseas::fetch_night(h, id).await?)
+                }
                 Kind::Quotes => MarketEvent::Quotes(quotes(h, &job.symbols).await?),
                 Kind::Turnover => MarketEvent::Turnover(crate::turnover::fetch(h).await?),
                 Kind::Chart => MarketEvent::Chart(
@@ -512,6 +630,12 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             || (kind == Kind::Chart && job.focus.is_none())
             || (kind == Kind::Catalog && job.demo)
             || (kind == Kind::Sectors && !job.heatmap_enabled)
+            || (kind == Kind::Overseas && job.overseas.as_ref().is_none_or(|j| j.ids.is_empty()))
+            || (kind == Kind::Overnight
+                && job
+                    .overseas
+                    .as_ref()
+                    .is_none_or(|j| !j.us || j.focus.is_none()))
         {
             deadline = tokio::time::Instant::now() + Duration::from_secs(86400);
             continue;
@@ -528,6 +652,13 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
             }
         };
         let base = match kind {
+            Kind::Overseas => request
+                .config
+                .refresh
+                .quotes_secs
+                .max(request.config.refresh.chart_secs)
+                .max(30),
+            Kind::Overnight => request.config.refresh.quotes_secs.max(60),
             Kind::Quotes => request.config.refresh.quotes_secs,
             Kind::Turnover => request.config.refresh.quotes_secs.max(60),
             Kind::Chart => request.config.refresh.chart_secs,

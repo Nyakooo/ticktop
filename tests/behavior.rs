@@ -1476,3 +1476,60 @@ fn minimal_name_peek_fallback_and_text_input_remain_usable() {
     assert!(matches!(&app.modal, Some(Modal::Search { query, .. }) if query == "v"));
     assert!(!app.reveal_names);
 }
+
+#[test]
+fn jk_match_stock_selection_arrows_in_both_modes() {
+    for mode in [Mode::Full, Mode::Minimal] {
+        let (_dir, mut app) = app();
+        app.modal = None;
+        app.user.mode = mode;
+        app.user.heatmap = false;
+        app.user.add("sh600519", 0).unwrap();
+        app.user.add("sz300750", 0).unwrap();
+        let initial = app.user.selected.clone();
+        let period = app.user.period;
+        app.key(key(KeyCode::Down));
+        let next = app.user.selected.clone();
+        app.key(key(KeyCode::Up));
+        assert_eq!(app.user.selected, initial);
+        app.key(key(KeyCode::Char('j')));
+        assert_eq!(app.user.selected, next);
+        app.key(key(KeyCode::Char('k')));
+        assert_eq!(app.user.selected, initial);
+        assert_eq!(app.user.period, period);
+        app.key(key(KeyCode::Char('/')));
+        app.key(key(KeyCode::Char('j')));
+        app.key(key(KeyCode::Char('k')));
+        assert!(matches!(&app.modal, Some(Modal::Search { query, .. }) if query == "jk"));
+    }
+}
+
+#[test]
+fn shifted_arrows_inspect_chart_without_switching_stock_or_period() {
+    let (_dir, mut app) = app();
+    app.modal = None;
+    let selected = app.user.selected.clone();
+    let period = app.user.period;
+    app.on_market(MarketEvent::Chart(market::demo_history(
+        selected.as_ref().unwrap(),
+        period,
+    )));
+    let last = app.series().unwrap().points.len() - 1;
+    assert!(last > 0);
+    app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    assert_eq!(app.chart_cursor, Some(last - 1));
+    app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+    assert_eq!(app.chart_cursor, Some(last));
+    app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+    assert_eq!(app.chart_cursor, Some(last));
+    app.key(key(KeyCode::Home));
+    app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    assert_eq!(app.chart_cursor, Some(0));
+    app.key(key(KeyCode::End));
+    assert_eq!(app.chart_cursor, Some(last));
+    assert_eq!(app.user.selected, selected);
+    assert_eq!(app.user.period, period);
+    app.key(key(KeyCode::Right));
+    assert_ne!(app.user.period, period);
+    assert_eq!(app.user.selected, selected);
+}

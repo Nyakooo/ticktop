@@ -647,6 +647,14 @@ impl App {
         if self.user.heatmap && self.cloud_key(key.code) {
             return;
         }
+        let mut key = key;
+        if !self.user.heatmap && key.modifiers.is_empty() {
+            key.code = match key.code {
+                KeyCode::Char('j') => KeyCode::Down,
+                KeyCode::Char('k') => KeyCode::Up,
+                code => code,
+            };
+        }
         let previous = (
             self.user.mode,
             self.user.heatmap,
@@ -780,26 +788,25 @@ impl App {
                     self.request_dirty = true;
                 }
             }
+            KeyCode::Left | KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if let Some(s) = self.series().filter(|s| !s.points.is_empty()) {
+                    let last = s.points.len() - 1;
+                    let i = self.chart_cursor.unwrap_or(last).min(last);
+                    self.chart_cursor = Some(if key.code == KeyCode::Left {
+                        i.saturating_sub(1)
+                    } else {
+                        (i + 1).min(last)
+                    });
+                }
+            }
             KeyCode::Left | KeyCode::Right => {
                 self.user.period = self.user.period.next(key.code == KeyCode::Left);
                 self.load_chart();
                 self.request_dirty = true;
             }
-            // Shift+arrows inspect the chart without changing its period.
             KeyCode::Home => self.chart_cursor = Some(0),
             KeyCode::End => {
                 self.chart_cursor = self.series().map(|s| s.points.len().saturating_sub(1))
-            }
-            KeyCode::Char('j') | KeyCode::Char('k') => {
-                if let Some(s) = self.series() {
-                    let n = s.points.len();
-                    let i = self.chart_cursor.unwrap_or(n.saturating_sub(1));
-                    self.chart_cursor = Some(if key.code == KeyCode::Char('j') {
-                        i.saturating_sub(1)
-                    } else {
-                        (i + 1).min(n.saturating_sub(1))
-                    });
-                }
             }
             _ => {}
         }

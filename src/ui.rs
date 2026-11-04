@@ -580,14 +580,14 @@ fn detail(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         if let Some(i) = app.chart_cursor {
             let pt = &s.points[i.min(s.points.len().saturating_sub(1))];
             format!(
-                "{}   {} {}   j/k 游标",
+                "{}   {} {}   Shift+←→ 游标",
                 pt.label,
                 crate::instruments::price(&s.id, pt.price),
                 crate::instruments::unit(&s.id)
             )
         } else {
             format!(
-                "{} · {} · {}点 · j/k 查看",
+                "{} · {} · {}点 · Shift+←→ 查看",
                 s.date,
                 if app.user.period == Period::Intraday {
                     "分时价格"
@@ -1506,7 +1506,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
             let body = vec![
                 "↑↓ / PgUp/PgDn 滚动帮助；Esc 返回",
                 "m 完整/简约    h 行情/大盘云图    [ ] 自选分组",
-                "↑↓ 选择股票   ←→ 日内/1周/1月   j/k 走势游标",
+                "j/↓ 下一只 · k/↑ 上一只 · ←→ 周期 · Shift+←→ 游标",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
                 "g 分组管理（n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序）",
                 "t 置顶/取消 · Ctrl+↑↓ 当前分组自选排序 · e 设置 alias",

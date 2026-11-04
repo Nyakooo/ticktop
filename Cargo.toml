@@ -1,6 +1,6 @@
 [package]
 name = "ticktop"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.88"
 description = "A lightweight terminal market dashboard with watchlists, charts, and heatmaps."

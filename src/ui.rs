@@ -1008,20 +1008,7 @@ fn price_chart(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         );
     } else {
         for (wick, body, color) in &candles {
-            datasets.push(
-                Dataset::default()
-                    .marker(Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(*color))
-                    .data(wick),
-            );
-            datasets.push(
-                Dataset::default()
-                    .marker(Marker::HalfBlock)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(*color))
-                    .data(body),
-            );
+            datasets.extend(crate::candles::datasets(wick, body, *color));
         }
     }
     let price_guide = [(xmin, points[selected].1), (xmax, points[selected].1)];

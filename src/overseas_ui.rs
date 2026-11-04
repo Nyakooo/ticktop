@@ -447,20 +447,7 @@ fn chart(f: &mut Frame, app: &App, r: Rect, p: Palette, index: bool) {
         .collect::<Vec<_>>();
     if period != Period::Intraday {
         for (wick, body, c) in &candles {
-            datasets.push(
-                Dataset::default()
-                    .data(wick)
-                    .marker(Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(*c)),
-            );
-            datasets.push(
-                Dataset::default()
-                    .data(body)
-                    .marker(Marker::HalfBlock)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(*c)),
-            );
+            datasets.extend(crate::candles::datasets(wick, body, *c));
         }
     }
     let cursor_x = if period == Period::Intraday {

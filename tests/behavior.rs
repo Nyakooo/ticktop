@@ -1849,3 +1849,76 @@ fn minimal_market_columns_stay_together_when_terminal_is_widened() {
         app.reveal_names = false;
     }
 }
+
+#[test]
+fn candle_wicks_share_body_column_at_different_terminal_widths() {
+    let (_dir, mut app) = app();
+    app.user.period = Period::Day;
+    let id = app.user.selected.clone().unwrap();
+    let mut series = market::demo_history(&id, Period::Day);
+    series.points.truncate(1);
+    series.points[0].price = Price::parse("22").unwrap();
+    series.points[0].ohlc = Some(ticktop::model::Ohlc {
+        open: Price::parse("20").unwrap(),
+        high: Price::parse("25").unwrap(),
+        low: Price::parse("17").unwrap(),
+    });
+    app.on_market(MarketEvent::Chart(series));
+    for width in [80, 100, 159, 160, 201] {
+        let mut terminal = Terminal::new(TestBackend::new(width, 42)).unwrap();
+        terminal.draw(|f| ui::draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let body_columns: Vec<_> = (0..width)
+            .filter(|&x| (0..42).any(|y| matches!(buffer[(x, y)].symbol(), "█" | "▀" | "▄")))
+            .collect();
+        assert!(!body_columns.is_empty());
+        for x in body_columns {
+            assert!(
+                (0..42).any(|y| buffer[(x, y)].symbol() == "│"),
+                "candle body at column {x} lacks a centered wick at width {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn candle_body_and_wick_have_no_half_cell_breaks() {
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::Color,
+        widgets::{Axis, Chart, Widget},
+    };
+    // Isolate the same dataset layering used by both market charts. A half-block
+    // endpoint overwrites the wick in that cell, leaving a visible half-cell gap.
+    for height in [9, 12, 19, 28] {
+        for (open, close) in [(20., 22.), (22., 20.), (20.3, 21.7), (21., 21.)] {
+            let wick = [(0., 17.), (0., 25.)];
+            let body = [(0., open), (0., close)];
+            let area = Rect::new(0, 0, 21, height);
+            let mut buf = Buffer::empty(area);
+            Chart::new(ticktop::candles::datasets(&wick, &body, Color::Green).to_vec())
+                .x_axis(Axis::default().bounds([-0.5, 0.5]))
+                .y_axis(Axis::default().bounds([16., 26.]))
+                .render(area, &mut buf);
+            let occupied: Vec<_> = (0..height)
+                .flat_map(|y| (0..21).map(move |x| (x, y)))
+                .filter(|&(x, y)| matches!(buf[(x, y)].symbol(), "│" | "█"))
+                .collect();
+            let x = occupied.first().expect("candle rendered").0;
+            assert!(occupied.iter().all(|&(col, _)| col == x));
+            let top = occupied.iter().map(|&(_, y)| y).min().unwrap();
+            let bottom = occupied.iter().map(|&(_, y)| y).max().unwrap();
+            for y in top..=bottom {
+                assert!(
+                    matches!(buf[(x, y)].symbol(), "│" | "█"),
+                    "gap inside candle at ({x}, {y})"
+                );
+            }
+            assert!(
+                !buf.content.iter().any(|c| matches!(c.symbol(), "▀" | "▄")),
+                "half-cell body endpoint erases part of the underlying wick at height {height}"
+            );
+        }
+    }
+}

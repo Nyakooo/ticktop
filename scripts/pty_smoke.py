@@ -55,13 +55,17 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
             raise AssertionError("metric order must be volume ratio, turnover, volume")
 
         check_metric_order()
-        minimal_start = len(output)
         send("m")
+        # Ratatui emits cell diffs, not complete frames. Unchanged metric labels
+        # may be absent after a mode switch; repaint before checking their order.
+        minimal_start = len(output)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 37, 132, 0, 0))
+        os.kill(pid, signal.SIGWINCH)
         check_metric_order(minimal_start)
         send("m")
         send("\x1b[C")  # intraday -> daily candles
         # Force a full repaint: an incremental update may omit the unchanged volume label.
-        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 37, 132, 0, 0))
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 130, 0, 0))
         os.kill(pid, signal.SIGWINCH)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:

@@ -1676,14 +1676,14 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         Modal::Help { offset } => {
             let body = vec![
                 "↑↓ / PgUp/PgDn 滚动帮助；Esc 返回",
-                "F1 自选 / F2 指数 / F3 美股 / F4 云图（可鼠标点击）",
+                "1 自选 / 2 指数 / 3 美股 / 4 云图（可鼠标点击）",
                 "m 完整/简约 · h 云图/返回前页 · [ ] 当前市场分组",
                 "美股 Tab 切时段 · a / / 模糊搜索订阅 · g 分组选择/创建 · G 加入分组",
                 "美股 t 置顶 · Alt+↑↓ 排序 · e 别名 · r 重命名分组 · d 移除（确认）",
                 "指数 Tab 我的关注/全部 · Enter 走势 · Esc 总览",
                 "指数 a 添加（中文/代码/拼音）· d 取消关注 · t 置顶 · Alt+↑↓ 排序",
                 "j/↓ 下一只 · k/↑ 上一只 · ←→ 周期 · Shift+←→ 游标",
-                "滚轮切标的／云图翻页；页签上滚轮或 Shift+滚轮切换 F1–F4",
+                "滚轮切标的／云图翻页；页签上滚轮或 Shift+滚轮切换 1–4 市场页",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
                 "g 分组管理（n 新建 / r 重命名 / d 删除 / Alt+↑↓ 排序）",
                 "t 置顶/取消 · Alt+↑↓ 当前分组自选排序 · e 设置 alias",
@@ -2074,7 +2074,7 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
                 Page::Heatmap => 3,
             };
             app.key(KeyEvent::new(
-                KeyCode::F((current + step) % 4 + 1),
+                KeyCode::Char((b'1' + (current + step) % 4) as char),
                 KeyModifiers::NONE,
             ));
             return;
@@ -2083,7 +2083,7 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
     if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) && outer[5].contains(point) {
         if let Some(index) = crate::overseas_ui::nav_hit(outer[5], point) {
             app.key(KeyEvent::new(
-                KeyCode::F(index as u8 + 1),
+                KeyCode::Char((b'1' + index as u8) as char),
                 KeyModifiers::NONE,
             ));
         }

@@ -838,7 +838,11 @@ impl App {
             self.handle_modal(modal, key);
             return;
         }
-        if let KeyCode::F(n @ 1..=4) = key.code {
+        let page_key = match key.code {
+            KeyCode::Char(c @ '1'..='4') if key.modifiers.is_empty() => Some(c as u8 - b'0'),
+            _ => None,
+        };
+        if let Some(n) = page_key {
             self.set_page(
                 [
                     crate::overseas::Page::Watch,

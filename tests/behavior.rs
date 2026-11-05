@@ -1576,7 +1576,7 @@ fn market_pages_keep_selections_periods_and_h_return_independent() {
     app.modal = None;
     let stock = app.user.selected.clone();
     let period = app.user.period;
-    app.key(key(KeyCode::F(2)));
+    app.key(key(KeyCode::Char('2')));
     assert_eq!(app.page(), Page::Indices);
     app.key(key(KeyCode::Char('j')));
     assert_eq!(app.user.overseas.index_selected, "^KS11");
@@ -1587,15 +1587,15 @@ fn market_pages_keep_selections_periods_and_h_return_independent() {
     assert_eq!(app.page(), Page::Heatmap);
     app.key(key(KeyCode::Char('h')));
     assert_eq!(app.page(), Page::Indices);
-    app.key(key(KeyCode::F(3)));
+    app.key(key(KeyCode::Char('3')));
     app.key(key(KeyCode::Char('j')));
     assert_eq!(app.user.overseas.us_selected.as_deref(), Some("NVDA"));
     app.key(key(KeyCode::Tab));
     assert_eq!(app.user.overseas.session, Session::Pre);
-    app.key(key(KeyCode::F(1)));
+    app.key(key(KeyCode::Char('1')));
     assert_eq!(app.user.selected, stock);
     assert_eq!(app.user.period, period);
-    app.key(key(KeyCode::F(2)));
+    app.key(key(KeyCode::Char('2')));
     assert_eq!(app.user.overseas.index_selected, "^KS11");
     assert_eq!(app.user.overseas.index_period, Period::Day);
     app.persist().unwrap();
@@ -1653,7 +1653,7 @@ fn overseas_subscription_group_alias_pause_and_minimal_render() {
         app.user.mode = mode;
         for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {
             let s = screen(&app, w, h);
-            assert!(s.contains("F2"), "{w}x{h} {mode:?}\n{s}");
+            assert!(s.contains("2 "), "{w}x{h} {mode:?}\n{s}");
         }
     }
     app.key(key(KeyCode::Char('d')));
@@ -1684,7 +1684,7 @@ fn foreign_cache_and_navigation_mouse_work_in_both_modes() {
             for period in Period::ALL {
                 app.user.overseas.index_period = period;
                 let s = screen(&app, w, h);
-                assert!(s.contains("F2"), "{w}x{h} {mode:?}\n{s}");
+                assert!(s.contains("2 "), "{w}x{h} {mode:?}\n{s}");
             }
         }
     }
@@ -1731,7 +1731,7 @@ fn index_overview_follow_search_detail_sort_alias_and_empty_state_persist() {
         app.user.mode = mode;
         for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {
             let s = screen(&app, w, h);
-            assert!(s.contains("F2"));
+            assert!(s.contains("2 "));
             assert!(!s.contains("Shift+"));
         }
     }
@@ -1845,7 +1845,7 @@ fn minimal_market_columns_stay_together_when_terminal_is_widened() {
         // Very small windows and holding v for real Chinese names still render safely.
         app.reveal_names = true;
         let rendered = screen(&app, 46, 16);
-        assert!(rendered.contains("F2"));
+        assert!(rendered.contains("2 "));
         app.reveal_names = false;
     }
 }
@@ -2239,4 +2239,106 @@ fn us_search_adds_to_current_group_ignores_stale_responses_and_keeps_names_on_re
     });
     assert!(app.modal.is_none());
     app.user.overseas.validate().unwrap();
+}
+
+#[test]
+fn numeric_market_shortcuts_ignore_function_keys_and_show_numeric_nav_labels() {
+    use ticktop::overseas::Page;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    let pages = [Page::Watch, Page::Indices, Page::Us, Page::Heatmap];
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for start in pages {
+            app.set_page(start);
+            for n in 1..=4 {
+                app.key(key(KeyCode::F(n)));
+                assert_eq!(app.page(), start);
+            }
+            for (i, page) in pages.iter().enumerate() {
+                app.key(key(KeyCode::Char((b'1' + i as u8) as char)));
+                assert_eq!(app.page(), *page);
+            }
+        }
+        let rendered = screen(&app, 160, 42);
+        for label in if mode == Mode::Full {
+            ["1 自选", "2 指数", "3 美股", "4 云图"]
+        } else {
+            ["1 watch", "2 index", "3 us", "4 map"]
+        } {
+            assert!(rendered.contains(label), "missing nav label {label}");
+        }
+    }
+}
+
+#[test]
+fn numeric_market_shortcuts_do_not_capture_modal_text_input() {
+    use ticktop::{overseas::Page, overseas_app::Input};
+    let (_dir, mut app) = app();
+    app.set_page(Page::Watch);
+    let id = app.user.selected.clone().unwrap();
+    let modals = vec![
+        Modal::Search {
+            query: String::new(),
+            results: vec![],
+            index: 0,
+            adding: true,
+        },
+        Modal::IndexSearch {
+            query: String::new(),
+            results: vec![],
+            index: 0,
+        },
+        Modal::UsSearch {
+            query: String::new(),
+            results: vec![],
+            index: 0,
+            generation: 1,
+            status: String::new(),
+        },
+        Modal::OverseasInput {
+            purpose: Input::Alias,
+            input: String::new(),
+        },
+        Modal::Alias {
+            id,
+            input: String::new(),
+        },
+        Modal::GroupName {
+            id: None,
+            input: String::new(),
+        },
+        Modal::Settings {
+            draft: app.config.clone(),
+            field: 0,
+            input: String::new(),
+        },
+    ];
+    for modal in modals {
+        app.modal = Some(modal);
+        for c in "1234".chars() {
+            app.key(key(KeyCode::Char(c)));
+        }
+        assert_eq!(app.page(), Page::Watch);
+        let value = match app.modal.as_ref().unwrap() {
+            Modal::Search { query, .. }
+            | Modal::IndexSearch { query, .. }
+            | Modal::UsSearch { query, .. } => query,
+            Modal::OverseasInput { input, .. }
+            | Modal::Alias { input, .. }
+            | Modal::GroupName { input, .. }
+            | Modal::Settings { input, .. } => input,
+            _ => unreachable!(),
+        };
+        assert_eq!(value, "1234");
+        app.key(key(KeyCode::Esc));
+    }
+    for modifiers in [
+        KeyModifiers::ALT,
+        KeyModifiers::CONTROL,
+        KeyModifiers::SHIFT,
+    ] {
+        app.key(KeyEvent::new(KeyCode::Char('2'), modifiers));
+        assert_eq!(app.page(), Page::Watch);
+    }
 }

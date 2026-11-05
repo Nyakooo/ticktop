@@ -59,8 +59,8 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
     proc, master = launch('--full')
     try:
         wait_until(lambda: 'ticktop_' in visible(), 'startup missing')
-        send('\x1bOQ')  # F2
-        wait_until(lambda: state().get('overseas', {}).get('page') == 'indices', 'F2 did not select indices')
+        send('2')  # Numeric index-page shortcut.
+        wait_until(lambda: state().get('overseas', {}).get('page') == 'indices', '2 did not select indices')
         wait_until(lambda: '日经225' in visible(), 'index page missing')
         send('j\r\x1b[C')
         wait_until(lambda: state().get('overseas', {}).get('index_selected') == '^KS11' and state()['overseas']['index_period'] == 'day', 'selection/period not saved')
@@ -80,8 +80,8 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
         wait_until(lambda: state()['overseas']['index_detail'] is True, 'Enter did not show index history')
         send('\x1b')
         wait_until(lambda: state()['overseas']['index_detail'] is False, 'Esc did not close domestic history')
-        send('\x1bOR')  # F3
-        wait_until(lambda: state().get('overseas', {}).get('page') == 'us', 'F3 did not select US page')
+        send('3')  # Numeric US-page shortcut.
+        wait_until(lambda: state().get('overseas', {}).get('page') == 'us', '3 did not select US page')
         send('a')
         wait_until(lambda: '订阅美股' in visible(), 'subscription input missing')
         send('微软\r')
@@ -122,4 +122,4 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
             proc.terminate()
             proc.wait(timeout=5)
         os.close(master)
-print('PASS: F1-F4 navigation, h return, periods, Chinese US subscriptions, aliases, sessions and restart persistence')
+print('PASS: 1-4 navigation, h return, periods, Chinese US subscriptions, aliases, sessions and restart persistence')

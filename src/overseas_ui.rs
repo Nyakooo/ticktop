@@ -36,7 +36,7 @@ pub(crate) fn nav(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             page.label()
         };
         f.render_widget(
-            Paragraph::new(format!("F{} {}", i + 1, label)).style(
+            Paragraph::new(format!("{} {}", i + 1, label)).style(
                 Style::default()
                     .fg(if page == app.page() { p.accent } else { p.dim })
                     .bg(if page == app.page() { p.selected } else { p.bg }),

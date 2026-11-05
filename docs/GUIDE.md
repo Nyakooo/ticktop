@@ -247,7 +247,7 @@ Git Bash 也支持 README 中的 `curl ... | bash` 命令，自动调用 Windows
 
 ```powershell
 $env:TICKTOP_INSTALL_DIR = 'C:\Tools\Ticktop'
-$env:TICKTOP_VERSION = 'v0.5.2'
+$env:TICKTOP_VERSION = 'v0.5.3'
 irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
 ```
 
@@ -317,3 +317,5 @@ F2 默认打开总览表，不再默认占用半屏显示单个指数曲线。�
 - `e` 设置简约别名，`v` 临时查看原名。
 
 关注列表、置顶、顺序、总览/走势状态、当前范围都保存在 `state.json` 的 `overseas` 项。旧文件缺少新字段时自动采用默认设置。目录之外的指数需先验证数据源，不能直接添加任意代码。总览仅请求报价元数据与国内批量报价，展开详情后才请求所选指数的分钟或 K 线数据。
+
+鼠标滚轮在行情内容区切换当前列表的上一只／下一只标的，适用于自选、指数总览与详情、美股；云图滚轮用于翻页。完整和简约模式均支持，普通滚轮不会切换市场页面。Shift＋滚轮切换 F1–F4：向下进入下一页，向上进入上一页，首尾循环；部分终端会拦截该组合，此时使用 F1–F4 或点击页签。

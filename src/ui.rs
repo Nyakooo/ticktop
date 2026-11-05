@@ -1653,6 +1653,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "指数 Tab 我的关注/全部 · Enter 走势 · Esc 总览",
                 "指数 a 添加（中文/代码/拼音）· d 取消关注 · t 置顶 · Ctrl+↑↓ 排序",
                 "j/↓ 下一只 · k/↑ 上一只 · ←→ 周期 · Shift+←→ 游标",
+                "鼠标滚轮切换当前标的；云图滚轮翻页；Shift+滚轮切换 F1–F4",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
                 "g 分组管理（n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序）",
                 "t 置顶/取消 · Ctrl+↑↓ 当前分组自选排序 · e 设置 alias",
@@ -2023,6 +2024,27 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
     if app.modal.is_some() || width < 46 || height < 16 {
         return;
     }
+    if event.modifiers.contains(KeyModifiers::SHIFT) {
+        let step = match event.kind {
+            MouseEventKind::ScrollDown => Some(1),
+            MouseEventKind::ScrollUp => Some(3),
+            _ => None,
+        };
+        if let Some(step) = step {
+            use crate::overseas::Page;
+            let current = match app.page() {
+                Page::Watch => 0,
+                Page::Indices => 1,
+                Page::Us => 2,
+                Page::Heatmap => 3,
+            };
+            app.key(KeyEvent::new(
+                KeyCode::F((current + step) % 4 + 1),
+                KeyModifiers::NONE,
+            ));
+            return;
+        }
+    }
     app.set_viewport(width, height);
     let outer = outer_layout(Rect::new(0, 0, width, height), app);
     let point = Position::new(event.column, event.row);
@@ -2034,6 +2056,27 @@ pub fn mouse(app: &mut App, event: crossterm::event::MouseEvent, width: u16, hei
             ));
         }
         return;
+    }
+    // Scroll only selects entries in the active market (clouds keep paging).
+    // Reuse keyboard handling so selection, charts and persistence stay in sync.
+    if outer[2].contains(point) {
+        let code = match event.kind {
+            MouseEventKind::ScrollDown => Some(if app.user.heatmap {
+                KeyCode::PageDown
+            } else {
+                KeyCode::Down
+            }),
+            MouseEventKind::ScrollUp => Some(if app.user.heatmap {
+                KeyCode::PageUp
+            } else {
+                KeyCode::Up
+            }),
+            _ => None,
+        };
+        if let Some(code) = code {
+            app.key(KeyEvent::new(code, KeyModifiers::NONE));
+            return;
+        }
     }
     if matches!(
         app.page(),

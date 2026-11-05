@@ -116,8 +116,17 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 },
                 q.map(|q| format!("{:.2}", q.price))
                     .unwrap_or_else(|| "--".into()),
-                pct.map(|p| format!("{p:+.2}%"))
-                    .unwrap_or_else(|| "--".into()),
+                pct.map(|v| {
+                    format!(
+                        "{v:+.2}{}",
+                        if app.user.mode == Mode::Minimal {
+                            ""
+                        } else {
+                            "%"
+                        }
+                    )
+                })
+                .unwrap_or_else(|| "--".into()),
             ];
             if !index {
                 cells.push(
@@ -195,7 +204,14 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
                 q.price,
                 if index { "点" } else { "USD" },
                 q.percent()
-                    .map(|v| format!("{v:+.2}%"))
+                    .map(|v| format!(
+                        "{v:+.2}{}",
+                        if app.user.mode == Mode::Minimal {
+                            ""
+                        } else {
+                            "%"
+                        }
+                    ))
                     .unwrap_or_else(|| "--".into())
             )
         })
@@ -812,8 +828,17 @@ fn index_overview(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             ));
             cells.push(
                 ratatui::widgets::Cell::from(
-                    pct.map(|v| format!("{v:+.2}%"))
-                        .unwrap_or_else(|| "--".into()),
+                    pct.map(|v| {
+                        format!(
+                            "{v:+.2}{}",
+                            if app.user.mode == Mode::Minimal {
+                                ""
+                            } else {
+                                "%"
+                            }
+                        )
+                    })
+                    .unwrap_or_else(|| "--".into()),
                 )
                 .style(Style::default().fg(pct.map(|v| p.change(v)).unwrap_or(p.dim))),
             );

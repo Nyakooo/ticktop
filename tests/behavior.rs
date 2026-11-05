@@ -1922,3 +1922,102 @@ fn candle_body_and_wick_have_no_half_cell_breaks() {
         }
     }
 }
+
+#[test]
+fn mouse_wheel_selects_current_market_without_switching_pages() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    use ticktop::overseas::Page;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        for page in [Page::Watch, Page::Indices, Page::Us] {
+            app.set_page(page);
+            let selected = |a: &App| match page {
+                Page::Watch => a.user.selected.clone(),
+                _ => a.user.overseas.selected().map(str::to_owned),
+            };
+            let before = selected(&app);
+            app.key(key(KeyCode::Down));
+            let expected = selected(&app);
+            assert_ne!(before, expected);
+            app.key(key(KeyCode::Up));
+            for (kind, want) in [
+                (MouseEventKind::ScrollDown, expected),
+                (MouseEventKind::ScrollUp, before),
+            ] {
+                ui::mouse(
+                    &mut app,
+                    MouseEvent {
+                        kind,
+                        column: 100,
+                        row: 20,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    160,
+                    42,
+                );
+                assert_eq!(selected(&app), want, "{page:?} {mode:?}");
+                assert_eq!(app.page(), page);
+            }
+        }
+    }
+}
+
+#[test]
+fn shifted_mouse_wheel_cycles_market_pages_without_selecting_entries() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    use ticktop::overseas::Page;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        app.set_page(Page::Watch);
+        let stock = app.user.selected.clone();
+        let index = app.user.overseas.index_selected.clone();
+        let us = app.user.overseas.us_selected.clone();
+        for (kind, pages) in [
+            (
+                MouseEventKind::ScrollDown,
+                [Page::Indices, Page::Us, Page::Heatmap, Page::Watch],
+            ),
+            (
+                MouseEventKind::ScrollUp,
+                [Page::Heatmap, Page::Us, Page::Indices, Page::Watch],
+            ),
+        ] {
+            for page in pages {
+                ui::mouse(
+                    &mut app,
+                    MouseEvent {
+                        kind,
+                        column: 100,
+                        row: 20,
+                        modifiers: KeyModifiers::SHIFT,
+                    },
+                    160,
+                    42,
+                );
+                assert_eq!(app.page(), page);
+                assert_eq!(app.user.selected, stock);
+                assert_eq!(app.user.overseas.index_selected, index);
+                assert_eq!(app.user.overseas.us_selected, us);
+            }
+        }
+        app.key(key(KeyCode::Char('?')));
+        assert!(app.modal.is_some());
+        ui::mouse(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 100,
+                row: 20,
+                modifiers: KeyModifiers::SHIFT,
+            },
+            160,
+            42,
+        );
+        assert_eq!(app.page(), Page::Watch);
+        app.key(key(KeyCode::Esc));
+    }
+}

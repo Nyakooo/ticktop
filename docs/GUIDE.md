@@ -182,6 +182,8 @@ Linux 设置了 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` 时，分别使用对应变�
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
+python3 -m pip install -r scripts/requirements-smoke.txt
+python3 scripts/pty_smoke.py
 python3 scripts/mode_smoke.py
 cargo test --release bundled_catalog_search_is_fast_enough_for_typing -- --ignored --nocapture
 python3 -m unittest discover -s tests -p 'test_*.py' -v
@@ -247,7 +249,7 @@ Git Bash 也支持 README 中的 `curl ... | bash` 命令，自动调用 Windows
 
 ```powershell
 $env:TICKTOP_INSTALL_DIR = 'C:\Tools\Ticktop'
-$env:TICKTOP_VERSION = 'v0.5.4'
+$env:TICKTOP_VERSION = 'v0.5.5'
 irm https://raw.githubusercontent.com/Nyakooo/ticktop/master/scripts/install.ps1 | iex
 ```
 

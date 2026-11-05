@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import pty
-import re
 import select
 import struct
 import subprocess
@@ -13,6 +12,7 @@ import sys
 import tempfile
 import time
 import termios
+from terminal_screen import TerminalScreen
 
 binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else 'target/release/ticktop').resolve())
 
@@ -25,6 +25,8 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
             return {}
 
     def launch(*flags):
+        global screen
+        screen = TerminalScreen(130, 36)
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 130, 0, 0))
         proc = subprocess.Popen([binary, '--demo', '--data-dir', directory, *flags], stdin=slave, stdout=slave, stderr=slave, env={**os.environ, 'TERM': 'xterm-256color'})
@@ -37,7 +39,9 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
         while time.monotonic() < deadline:
             if select.select([master], [], [], .05)[0]:
                 try:
-                    output.extend(os.read(master, 65536))
+                    chunk = os.read(master, 65536)
+                    output.extend(chunk)
+                    screen.feed(chunk)
                 except OSError:
                     pass
             if predicate():
@@ -47,14 +51,14 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
         raise AssertionError(message + '\n' + output[-1500:].decode(errors='replace'))
 
     def visible():
-        return re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', bytes(output)).decode(errors='replace')
+        return screen.text
 
     def send(value):
         os.write(master, value.encode())
 
     proc, master = launch('--full')
     try:
-        wait_until(lambda: b'ticktop_' in output, 'startup missing')
+        wait_until(lambda: 'ticktop_' in visible(), 'startup missing')
         send('\x1bOQ')  # F2
         wait_until(lambda: state().get('overseas', {}).get('page') == 'indices', 'F2 did not select indices')
         wait_until(lambda: '日经225' in visible(), 'index page missing')

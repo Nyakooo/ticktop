@@ -16,9 +16,17 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
-      - run: python3 scripts/pty_smoke.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r scripts/requirements-smoke.txt
+      - name: Terminal screen parser and installer regression tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Terminal PTY smoke with fragmented output
+        env:
+          TICKTOP_SMOKE_READ_SIZE: '257'
+        run: python3 scripts/pty_smoke.py
       - run: python3 scripts/mode_smoke.py
-      - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
 
   windows:
     runs-on: windows-2022

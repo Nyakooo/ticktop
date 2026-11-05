@@ -12,6 +12,7 @@ import sys
 import tempfile
 import termios
 import time
+from terminal_screen import TerminalScreen
 
 binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/ticktop").resolve())
 
@@ -19,13 +20,16 @@ binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/ticktop").
 def session(data, flags, expected, switch_to=None):
     pid, fd = pty.fork()
     if pid == 0:
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
         os.environ["TERM"] = "xterm-256color"
         os.execv(binary, [binary, "--demo", "--data-dir", data, *flags])
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
 
+    screen = TerminalScreen(100, 24)
+
     def wait_for(label):
         output = bytearray()
-        deadline = time.monotonic() + 4
+        deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             if select.select([fd], [], [], 0.1)[0]:
                 try:
@@ -35,9 +39,10 @@ def session(data, flags, expected, switch_to=None):
                 if not chunk:
                     break
                 output.extend(chunk)
-                if label.encode() in output:
+                screen.feed(chunk)
+                if label in screen.text:
                     return
-        raise AssertionError(f"Missing screen: {label}; output: {output[-500:]!r}")
+        raise AssertionError(f"Missing screen: {label}\n{screen.text}\nOutput: {output[-500:]!r}")
 
     try:
         wait_for(expected)

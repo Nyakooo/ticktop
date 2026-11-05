@@ -15,6 +15,7 @@ pub const CATALOG_URL: &str = "https://www.cninfo.com.cn/new/data/szse_stock.jso
 #[derive(Clone, Debug)]
 pub struct Request {
     pub overseas: Option<crate::overseas::Job>,
+    pub us_search: Option<(u64, String)>,
     pub config: Config,
     pub symbols: Vec<String>,
     pub focus: Option<String>,
@@ -36,6 +37,12 @@ pub enum Kind {
     Overnight,
 }
 pub enum MarketEvent {
+    UsSearch {
+        generation: u64,
+        query: String,
+        rows: Vec<Instrument>,
+        error: Option<String>,
+    },
     Overseas(Vec<crate::overseas::Snapshot>, Vec<String>),
     Overnight(String, Option<crate::overseas::Quote>),
     Quotes(Vec<Quote>),
@@ -425,6 +432,7 @@ fn same_job(a: &Request, b: &Request, kind: Kind) -> bool {
         }
 }
 pub fn spawn_workers(rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>) {
+    tokio::spawn(crate::us_search::worker(rx.clone(), tx.clone()));
     for kind in [
         Kind::Quotes,
         Kind::Chart,

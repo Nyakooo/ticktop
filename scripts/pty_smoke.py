@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix="ticktop-pty-") as data:
         send("\x1b[B\r")
         wait_until(lambda: state().get("group") == 1 and state().get("selected") == "sz300750",
                    "adding stock to named group was not saved")
-        send("\x1b[1;5B")
+        send("\x1b[1;3B")
         wait_until(lambda: next((g for g in state().get("groups", []) if g["id"] == 1), {}).get("symbols", [])[1:2] == ["sz300750"],
                    "manual order was not saved")
         send("t")

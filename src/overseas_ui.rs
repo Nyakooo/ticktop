@@ -72,7 +72,14 @@ fn panes(app: &App, r: Rect) -> (Rect, Rect) {
             let ids = app.user.overseas.visible();
             let longest = ids
                 .iter()
-                .map(|id| app.overseas_label(id).width())
+                .map(|id| {
+                    app.overseas_label(id).width()
+                        + if app.user.overseas.us_is_pinned(id) {
+                            2
+                        } else {
+                            0
+                        }
+                })
                 .max()
                 .unwrap_or(8);
             list.width = list
@@ -108,12 +115,18 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .map(|id| {
             let q = app.overseas_quote(id);
             let pct = q.and_then(|q| q.percent());
+            let label = if !index && app.user.mode == Mode::Full && app.overseas_label(id) != id {
+                format!("{id} {}", app.overseas_label(id))
+            } else {
+                app.overseas_label(id).to_string()
+            };
+            let label = if !index && app.user.overseas.us_is_pinned(id) {
+                format!("^ {label}")
+            } else {
+                label
+            };
             let mut cells = vec![
-                if !index && app.user.mode == Mode::Full && overseas::name(id) != id {
-                    format!("{id} {}", overseas::name(id))
-                } else {
-                    app.overseas_label(id).to_string()
-                },
+                label,
                 q.map(|q| format!("{:.2}", q.price))
                     .unwrap_or_else(|| "--".into()),
                 pct.map(|v| {
@@ -142,7 +155,14 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         .position(|id| Some(id.as_str()) == app.user.overseas.selected());
     let name_width = crate::ui::compact_name_width(
         ids.iter()
-            .map(|id| app.overseas_label(id).width())
+            .map(|id| {
+                app.overseas_label(id).width()
+                    + if app.user.overseas.us_is_pinned(id) {
+                        2
+                    } else {
+                        0
+                    }
+            })
             .max()
             .unwrap_or(8),
         list.width,

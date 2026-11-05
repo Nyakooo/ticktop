@@ -85,7 +85,12 @@ impl App {
                 .get(id)
                 .map_or(id, String::as_str)
         } else {
-            overseas::name(id)
+            self.user
+                .overseas
+                .us_names
+                .get(id)
+                .map(String::as_str)
+                .unwrap_or_else(|| overseas::name(id))
         }
     }
     pub fn overseas_select(&mut self, index: usize) {
@@ -110,6 +115,22 @@ impl App {
         let index_page = self.page() == Page::Indices;
         let state = &mut self.user.overseas;
         match key.code {
+            KeyCode::Up | KeyCode::Down
+                if !index_page && key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if let Some(id) = state.us_selected.clone()
+                    && let Err(e) = state.move_us_symbol(&id, key.code == KeyCode::Down)
+                {
+                    self.message = e.to_string();
+                }
+            }
+            KeyCode::Char('t') if !index_page => {
+                if let Some(id) = state.us_selected.clone()
+                    && let Err(e) = state.toggle_us_pin(&id)
+                {
+                    self.message = e.to_string();
+                }
+            }
             KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') if key.modifiers.is_empty() => {
                 let rows = if index_page {
                     state.index_rows()
@@ -176,10 +197,15 @@ impl App {
                 self.overseas_cursor = None;
             }
             KeyCode::Char('/' | 'a') if !index_page => {
-                self.modal = Some(Modal::OverseasInput {
-                    purpose: Input::Add,
-                    input: String::new(),
-                })
+                self.us_search_generation = self.us_search_generation.wrapping_add(1);
+                self.modal = Some(Modal::UsSearch {
+                    query: String::new(),
+                    results: crate::us_search::local(state, ""),
+                    index: 0,
+                    generation: self.us_search_generation,
+                    status: "常见美股＋已订阅；输入后补充在线结果".into(),
+                });
+                self.request_dirty = true;
             }
             KeyCode::Char('e') => {
                 if let Some(id) = state.selected() {
@@ -234,7 +260,7 @@ impl App {
     fn index_key(&mut self, key: KeyEvent) -> bool {
         let state = &mut self.user.overseas;
         match key.code {
-            KeyCode::Up | KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Up | KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
                 if let Err(e) = state.move_index(key.code == KeyCode::Down) {
                     self.message = e.to_string();
                 }

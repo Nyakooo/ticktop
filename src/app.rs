@@ -15,6 +15,13 @@ pub enum Confirm {
     DeleteGroup(u64),
 }
 pub enum Modal {
+    UsSearch {
+        query: String,
+        results: Vec<Instrument>,
+        index: usize,
+        generation: u64,
+        status: String,
+    },
     IndexSearch {
         query: String,
         results: Vec<Instrument>,
@@ -68,6 +75,7 @@ pub struct App {
     pub quotes: HashMap<String, Quote>,
     pub charts: HashMap<(String, Period), Series>,
     pub modal: Option<Modal>,
+    pub us_search_generation: u64,
     pub message: String,
     pub quote_error: Option<String>,
     pub turnover: Option<crate::turnover::Comparison>,
@@ -172,6 +180,7 @@ impl App {
             } else {
                 None
             },
+            us_search_generation: 0,
             message: String::new(),
             quote_error: None,
             overseas: cached_overseas
@@ -269,6 +278,12 @@ impl App {
             _ => None,
         };
         Request {
+            us_search: match &self.modal {
+                Some(Modal::UsSearch {
+                    query, generation, ..
+                }) if !query.trim().is_empty() => Some((*generation, query.trim().to_string())),
+                _ => None,
+            },
             overseas,
             config: self.config.clone(),
             symbols,
@@ -486,6 +501,39 @@ impl App {
     }
     pub fn on_market(&mut self, event: MarketEvent) {
         match event {
+            MarketEvent::UsSearch {
+                generation,
+                query,
+                rows,
+                error,
+            } => {
+                if let Some(Modal::UsSearch {
+                    generation: current,
+                    query: current_query,
+                    results,
+                    index,
+                    status,
+                }) = &mut self.modal
+                    && *current == generation
+                    && current_query.trim() == query
+                {
+                    let selected = results
+                        .get(*index)
+                        .filter(|s| s.name != crate::us_search::DIRECT_NAME)
+                        .map(|s| s.id.clone());
+                    *results = crate::us_search::merge(results.clone(), rows, &query);
+                    *index = selected
+                        .and_then(|id| results.iter().position(|s| s.id == id))
+                        .unwrap_or(0);
+                    *status = error.unwrap_or_else(|| {
+                        if self.demo {
+                            "演示模式：本地目录".into()
+                        } else {
+                            "本地＋在线结果；仅显示美股股票".into()
+                        }
+                    });
+                }
+            }
             MarketEvent::Overseas(snapshots, missing) => {
                 self.overseas_error = if missing.is_empty() {
                     None
@@ -885,7 +933,7 @@ impl App {
                     self.message = "全部自选为系统分组；g 管理自定义分组".into();
                 }
             }
-            KeyCode::Up | KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Up | KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
                 if let Some(id) = self.user.selected.clone() {
                     match self.user.move_symbol(&id, key.code == KeyCode::Down) {
                         Ok(()) => {
@@ -1002,6 +1050,9 @@ impl App {
     }
     fn handle_modal(&mut self, modal: Modal, key: KeyEvent) {
         if key.code == KeyCode::Esc {
+            if matches!(modal, Modal::UsSearch { .. }) {
+                self.request_dirty = true;
+            }
             if matches!(modal, Modal::Welcome(_))
                 && let Err(err) = self.save_default_mode()
             {
@@ -1010,6 +1061,59 @@ impl App {
             return;
         }
         let next = match modal {
+            Modal::UsSearch {
+                mut query,
+                mut results,
+                mut index,
+                mut generation,
+                mut status,
+            } => {
+                match key.code {
+                    KeyCode::Up => index = index.saturating_sub(1),
+                    KeyCode::Down => index = (index + 1).min(results.len().saturating_sub(1)),
+                    KeyCode::Enter => {
+                        if let Some(stock) = results.get(index) {
+                            if let Err(e) =
+                                self.overseas_input(crate::overseas_app::Input::Add, &stock.id)
+                            {
+                                self.message = e.to_string();
+                            } else {
+                                if stock.name != crate::us_search::DIRECT_NAME {
+                                    self.user
+                                        .overseas
+                                        .us_names
+                                        .insert(stock.id.clone(), stock.name.clone());
+                                }
+                                self.save_state_change();
+                                self.request_dirty = true;
+                                return;
+                            }
+                        }
+                    }
+                    _ => {
+                        if Self::input_char(&mut query, key) {
+                            query = query.chars().take(80).collect();
+                            self.us_search_generation = self.us_search_generation.wrapping_add(1);
+                            generation = self.us_search_generation;
+                            results = crate::us_search::local(&self.user.overseas, &query);
+                            index = 0;
+                            status = if query.trim().is_empty() {
+                                "常见美股＋已订阅；输入后补充在线结果".into()
+                            } else {
+                                "本地结果可直接选择；正在查询在线结果…".into()
+                            };
+                            self.request_dirty = true;
+                        }
+                    }
+                }
+                Some(Modal::UsSearch {
+                    query,
+                    results,
+                    index,
+                    generation,
+                    status,
+                })
+            }
             Modal::IndexSearch {
                 mut query,
                 mut results,
@@ -1179,7 +1283,7 @@ impl App {
                 let n = self.user.groups.len();
                 match key.code {
                     KeyCode::Up | KeyCode::Down
-                        if n > 0 && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        if n > 0 && key.modifiers.contains(KeyModifiers::ALT) =>
                     {
                         let next = if key.code == KeyCode::Down {
                             (index + 1).min(n - 1)
@@ -1266,6 +1370,10 @@ impl App {
                             if state.group == 0 {
                                 state.subscriptions.retain(|s| s != &id);
                                 state.aliases.remove(&id);
+                                state.us_names.remove(&id);
+                                for pins in state.us_pinned.values_mut() {
+                                    pins.retain(|s| s != &id);
+                                }
                                 for g in &mut state.groups {
                                     g.symbols.retain(|s| s != &id);
                                 }
@@ -1273,6 +1381,9 @@ impl App {
                                 state.groups.iter_mut().find(|g| g.id == state.group)
                             {
                                 g.symbols.retain(|s| s != &id);
+                                if let Some(pins) = state.us_pinned.get_mut(&state.group) {
+                                    pins.retain(|s| s != &id);
+                                }
                             }
                             state.ensure_selection();
                             self.overseas_cursor = None;

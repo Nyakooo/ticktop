@@ -224,10 +224,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         if app.user.overseas.index_detail {
             "m 简约  h 云图  Esc 总览  j/k 选择  ←→ 周期  Shift+←→ 游标  ? 帮助  q 退出"
         } else {
-            "m 简约  h 云图  j/k 选择  Enter 走势  a 添加  d 移除  t 置顶  Ctrl+↑↓ 排序  e 别名  ?  q"
+            "m 简约  h 云图  j/k 选择  Enter 走势  a 添加  d 移除  t 置顶  Alt+↑↓ 排序  e 别名  ?  q"
         }
     } else if overseas {
-        "m 简约  h 云图  j/k 选择  ←→ 周期  Tab 时段  a 订阅  e 别名  g 分组  ? 帮助  q 退出"
+        "m 简约  h 云图  j/k 选择  ←→ 周期  Tab 时段  t 置顶  Alt+↑↓ 排序  a 订阅  e 别名  g 分组  ? 帮助  q 退出"
     } else if app.user.heatmap {
         if app.user.mode == Mode::Minimal {
             "m mode  h back     Tab type  n/p page  s sort  mouse  i index  i index  , cfg  ?  q"
@@ -241,7 +241,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "m mode  v toggle:name  t pin  e alias  g groups  / find  ?  q"
         }
     } else {
-        "m 简约  h 云图  t 置顶  Ctrl+↑↓ 排序  e 别名  g 分组  / 搜索  ←→ 周期  ? 帮助  q 退出"
+        "m 简约  h 云图  t 置顶  Alt+↑↓ 排序  e 别名  g 分组  / 搜索  ←→ 周期  ? 帮助  q 退出"
     };
     frame.render_widget(
         Paragraph::new(keys).style(Style::default().fg(p.dim)),
@@ -1547,7 +1547,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
         78,
         match modal {
             Modal::Help { .. } => 32,
-            Modal::Search { .. } => 24,
+            Modal::Search { .. } | Modal::UsSearch { .. } => 24,
             Modal::Settings { .. } => 24,
             _ => 16,
         },
@@ -1559,6 +1559,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
     );
     let title = match modal {
         Modal::IndexSearch { .. } => "添加指数 · 中文 / 代码 / 拼音",
+        Modal::UsSearch { .. } => "订阅美股 · 代码 / 名称 / 拼音",
         Modal::OverseasInput { purpose, .. } => purpose.label(),
         Modal::Welcome(_) => "首次启动",
         Modal::Help { .. } => "快捷键 / 编号映射",
@@ -1580,17 +1581,36 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
             query,
             results,
             index,
+        }
+        | Modal::UsSearch {
+            query,
+            results,
+            index,
+            ..
         } => {
+            let us = matches!(modal, Modal::UsSearch { .. });
             let rows = Layout::vertical([
                 Constraint::Length(2),
                 Constraint::Min(1),
-                Constraint::Length(2),
+                Constraint::Length(if us { 3 } else { 2 }),
             ])
             .split(inner);
             draw_input(f, rows[0], query, p);
             let items = results
                 .iter()
                 .map(|stock| {
+                    if us {
+                        return ListItem::new(format!(
+                            "{}  {}  {}",
+                            stock.id,
+                            stock.name,
+                            if app.user.overseas.subscriptions.contains(&stock.id) {
+                                "已订阅"
+                            } else {
+                                "+"
+                            }
+                        ));
+                    }
                     ListItem::new(format!(
                         "{}  {}  {}  {}",
                         stock.name,
@@ -1609,7 +1629,17 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 rows[1],
                 &mut ListState::default().with_selected((!results.is_empty()).then_some(*index)),
             );
-            f.render_widget(Paragraph::new("↑↓ 选择 · Enter 加入关注 · Esc 取消\n内置目录提供代码与数据源，移除关注不会删除目录。").style(Style::default().fg(p.dim)),rows[2]);
+            let hint = if let Modal::UsSearch { status, .. } = modal {
+                format!(
+                    "↑↓ 选择 · Enter 订阅到当前分组 · Esc 取消\n代码 / 中英文 / 拼音；中文仅本地目录\n{status}"
+                )
+            } else {
+                "↑↓ 选择 · Enter 加入关注 · Esc 取消\n内置目录提供代码与数据源，移除关注不会删除目录。".into()
+            };
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(p.dim)),
+                rows[2],
+            );
         }
         Modal::OverseasInput { input, .. } => {
             f.render_widget(Paragraph::new(format!("{input}▏\n\nEnter 保存 · Esc 取消 · Ctrl+u 清空\n美股：a 添加，g 选择/创建分组，G 加入分组，r 重命名\n常见名称：苹果、英伟达、特斯拉；其他股票输入代码")).wrap(Wrap{trim:false}),inner);
@@ -1648,15 +1678,15 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "↑↓ / PgUp/PgDn 滚动帮助；Esc 返回",
                 "F1 自选 / F2 指数 / F3 美股 / F4 云图（可鼠标点击）",
                 "m 完整/简约 · h 云图/返回前页 · [ ] 当前市场分组",
-                "美股 Tab 切时段 · a / / 订阅 · g 分组选择/创建 · G 加入分组",
-                "美股 e 别名 · r 重命名分组 · d 移除（确认）",
+                "美股 Tab 切时段 · a / / 模糊搜索订阅 · g 分组选择/创建 · G 加入分组",
+                "美股 t 置顶 · Alt+↑↓ 排序 · e 别名 · r 重命名分组 · d 移除（确认）",
                 "指数 Tab 我的关注/全部 · Enter 走势 · Esc 总览",
-                "指数 a 添加（中文/代码/拼音）· d 取消关注 · t 置顶 · Ctrl+↑↓ 排序",
+                "指数 a 添加（中文/代码/拼音）· d 取消关注 · t 置顶 · Alt+↑↓ 排序",
                 "j/↓ 下一只 · k/↑ 上一只 · ←→ 周期 · Shift+←→ 游标",
                 "滚轮切标的／云图翻页；页签上滚轮或 Shift+滚轮切换 F1–F4",
                 "/ 搜索  Enter 查看  a 添加  d 移除（确认）",
-                "g 分组管理（n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序）",
-                "t 置顶/取消 · Ctrl+↑↓ 当前分组自选排序 · e 设置 alias",
+                "g 分组管理（n 新建 / r 重命名 / d 删除 / Alt+↑↓ 排序）",
+                "t 置顶/取消 · Alt+↑↓ 当前分组自选排序 · e 设置 alias",
                 "r 修改当前分组名称；全部自选不可重命名",
                 "简约模式 v 临时显示原名；支持释放事件时按住查看，否则再按还原",
                 ", 设置  i 常驻指数  Space 暂停显示  Esc 返回  q 退出",
@@ -1819,7 +1849,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
             );
             f.render_widget(
                 Paragraph::new(
-                    "n 新建 / r 重命名 / d 删除 / Ctrl+↑↓ 排序 / Enter 切换\n删除分组保留股票；全部自选不可删除",
+                    "n 新建 / r 重命名 / d 删除 / Alt+↑↓ 排序 / Enter 切换\n删除分组保留股票；全部自选不可删除",
                 )
                 .style(Style::default().fg(p.dim)),
                 parts[1],

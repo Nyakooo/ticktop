@@ -86,6 +86,11 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
         wait_until(lambda: '订阅美股' in visible(), 'subscription input missing')
         send('微软\r')
         wait_until(lambda: state().get('overseas', {}).get('us_selected') == 'MSFT', 'Chinese subscription failed')
+        send('\x1b[1;3A')  # Alt+Up reorders the current US subscription.
+        wait_until(lambda: state()['overseas']['subscriptions'].index('MSFT') == 2, 'US order not saved')
+        send('t')
+        wait_until(lambda: 'MSFT' in state()['overseas'].get('us_pinned', {}).get('0', []), 'US pin not saved')
+        wait_until(lambda: '^ MSFT' in visible(), 'US pin marker missing')
         send('eoffice\r')
         wait_until(lambda: state().get('overseas', {}).get('aliases', {}).get('MSFT') == 'office', 'US alias missing')
         send('m')
@@ -106,6 +111,8 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
     try:
         wait_until(lambda: 'office' in visible(), 'US alias/page not restored on restart')
         assert state()['overseas']['page'] == 'us' and state()['mode'] == 'minimal'
+        assert 'MSFT' in state()['overseas']['us_pinned']['0']
+        assert state()['overseas']['subscriptions'].index('MSFT') == 2
         assert 'sh000300' in state()['overseas']['index_watchlist'] and 'sh000300' in state()['overseas']['index_pinned']
         send('q')
         wait_until(lambda: proc.poll() is not None, 'restart exit failed')

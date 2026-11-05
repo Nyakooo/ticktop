@@ -12,7 +12,7 @@ pub const INDICES: [(&str, &str); 4] = [
     ("^IXIC", "纳斯达克综合"),
     ("^GSPC", "标普500"),
 ];
-pub const STOCKS: [(&str, &str); 12] = [
+pub const STOCKS: [(&str, &str); 13] = [
     ("AAPL", "苹果"),
     ("NVDA", "英伟达"),
     ("TSLA", "特斯拉"),
@@ -25,6 +25,7 @@ pub const STOCKS: [(&str, &str); 12] = [
     ("BABA", "阿里巴巴"),
     ("PDD", "拼多多"),
     ("BRK-B", "伯克希尔B"),
+    ("MU", "美光"),
 ];
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -92,6 +93,8 @@ pub struct State {
     pub us_period: Period,
     pub session: Session,
     pub subscriptions: Vec<String>,
+    pub us_pinned: BTreeMap<u64, Vec<String>>,
+    pub us_names: BTreeMap<String, String>,
     pub groups: Vec<crate::storage::Group>,
     pub group: u64,
     pub aliases: BTreeMap<String, String>,
@@ -114,6 +117,8 @@ impl Default for State {
             us_period: Period::Intraday,
             session: Session::All,
             subscriptions: vec!["AAPL".into(), "NVDA".into(), "TSLA".into()],
+            us_pinned: BTreeMap::new(),
+            us_names: BTreeMap::new(),
             groups: vec![],
             group: 0,
             aliases: BTreeMap::new(),
@@ -137,7 +142,7 @@ pub fn name(id: &str) -> &str {
 }
 impl State {
     pub fn visible(&self) -> Vec<String> {
-        if self.group == 0 {
+        let mut rows = if self.group == 0 {
             self.subscriptions.clone()
         } else {
             self.groups
@@ -145,7 +150,54 @@ impl State {
                 .find(|g| g.id == self.group)
                 .map(|g| g.symbols.clone())
                 .unwrap_or_default()
+        };
+        rows.sort_by_key(|id| !self.us_is_pinned(id));
+        rows
+    }
+    pub fn us_is_pinned(&self, id: &str) -> bool {
+        self.us_pinned
+            .get(&self.group)
+            .is_some_and(|ids| ids.iter().any(|s| s == id))
+    }
+    pub fn toggle_us_pin(&mut self, id: &str) -> Result<()> {
+        if !self.visible().iter().any(|s| s == id) {
+            bail!("标的不在当前美股分组");
         }
+        let ids = self.us_pinned.entry(self.group).or_default();
+        if ids.iter().any(|s| s == id) {
+            ids.retain(|s| s != id);
+        } else {
+            ids.push(id.into());
+        }
+        Ok(())
+    }
+    pub fn move_us_symbol(&mut self, id: &str, down: bool) -> Result<()> {
+        let visible = self.visible();
+        let i = visible
+            .iter()
+            .position(|s| s == id)
+            .context("标的不在当前美股分组")?;
+        let next = if down { i + 1 } else { i.saturating_sub(1) };
+        if next == i || next >= visible.len() {
+            return Ok(());
+        }
+        if self.us_is_pinned(id) != self.us_is_pinned(&visible[next]) {
+            bail!("置顶项与普通项分别排序，按 t 切换置顶");
+        }
+        let rows = if self.group == 0 {
+            &mut self.subscriptions
+        } else {
+            &mut self
+                .groups
+                .iter_mut()
+                .find(|g| g.id == self.group)
+                .context("美股分组不存在")?
+                .symbols
+        };
+        let a = rows.iter().position(|s| s == id).unwrap();
+        let b = rows.iter().position(|s| s == &visible[next]).unwrap();
+        rows.swap(a, b);
+        Ok(())
     }
     pub fn selected(&self) -> Option<&str> {
         if self.page == Page::Indices {
@@ -210,6 +262,34 @@ impl State {
         }
         if self.group != 0 && !ids.contains(&self.group) {
             bail!("美股分组不存在");
+        }
+        for (id, name) in &self.us_names {
+            if !self.subscriptions.contains(id)
+                || name.trim().is_empty()
+                || name.chars().count() > 128
+                || name.chars().any(char::is_control)
+            {
+                bail!("美股名称无效");
+            }
+        }
+        for (group, pins) in &self.us_pinned {
+            let members = if *group == 0 {
+                &self.subscriptions
+            } else {
+                &self
+                    .groups
+                    .iter()
+                    .find(|g| g.id == *group)
+                    .context("美股置顶分组不存在")?
+                    .symbols
+            };
+            let mut seen = HashSet::new();
+            if pins
+                .iter()
+                .any(|id| !members.contains(id) || !seen.insert(id))
+            {
+                bail!("美股置顶标的无效或重复");
+            }
         }
         for (id, alias) in &self.aliases {
             if !(self.subscriptions.contains(id) || crate::index_board::contains(id))

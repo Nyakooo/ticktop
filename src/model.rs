@@ -10,7 +10,11 @@ pub struct Instrument {
 }
 impl Instrument {
     pub fn code(&self) -> &str {
-        self.id.get(2..).unwrap_or(&self.id)
+        if matches!(self.id.get(..2), Some("sh" | "sz" | "bj" | "hk")) {
+            self.id.get(2..).unwrap_or(&self.id)
+        } else {
+            &self.id
+        }
     }
     pub fn exchange(&self) -> &str {
         match self.id.get(..2) {

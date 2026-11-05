@@ -1268,7 +1268,7 @@ fn pinning_manual_order_and_aliases_persist_without_cross_group_changes() {
 fn watchlist_shortcuts_rename_and_minimal_alias_replace_code() {
     let (_dir, mut app) = app();
     let ids = app.user.watchlist.clone();
-    app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL));
+    app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
     assert_eq!(app.visible()[1], ids[0]);
     app.key(key(KeyCode::Char('t')));
     assert_eq!(app.visible()[0], ids[0]);
@@ -1297,7 +1297,7 @@ fn watchlist_shortcuts_rename_and_minimal_alias_replace_code() {
     assert_eq!(app.user.group_name(), "观察清单");
     let first = app.user.groups[0].id;
     app.key(key(KeyCode::Char('g')));
-    app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL));
+    app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
     app.key(key(KeyCode::Esc));
     assert_eq!(app.user.groups[1].id, first);
     let saved = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
@@ -1762,7 +1762,7 @@ fn index_overview_follow_search_detail_sort_alias_and_empty_state_persist() {
     assert!(app.request().overseas.unwrap().focus.is_none());
     app.key(key(KeyCode::Char('t')));
     let previous = app.user.overseas.index_rows();
-    app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL));
+    app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
     assert_ne!(app.user.overseas.index_rows(), previous);
     app.key(key(KeyCode::Char('e')));
     for c in "work".chars() {
@@ -2090,4 +2090,153 @@ fn tab_mouse_wheel_cycles_pages_and_ignores_blank_header() {
         assert_eq!(app.page(), Page::Watch);
         app.key(key(KeyCode::Esc));
     }
+}
+
+#[test]
+fn us_pin_and_alt_order_shortcuts_render_persist_and_clean_up_removals() {
+    use ticktop::overseas::Page;
+    for mode in [Mode::Full, Mode::Minimal] {
+        let (_dir, mut app) = app();
+        app.modal = None;
+        app.user.mode = mode;
+        app.set_page(Page::Us);
+        app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+        assert_eq!(app.user.overseas.visible(), ["NVDA", "AAPL", "TSLA"]);
+        assert_eq!(app.user.overseas.us_selected.as_deref(), Some("AAPL"));
+        app.key(key(KeyCode::Char('t')));
+        assert_eq!(app.user.overseas.visible(), ["AAPL", "NVDA", "TSLA"]);
+        app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+        assert!(app.message.contains("分别排序"));
+        assert_eq!(app.user.overseas.us_selected.as_deref(), Some("AAPL"));
+        assert!(screen(&app, 160, 42).contains("^ AAPL"));
+        let group = app.user.overseas.group_named("美股观察").unwrap();
+        app.user.overseas.groups[0].symbols = vec!["NVDA".into(), "AAPL".into(), "TSLA".into()];
+        app.user.overseas.group = group;
+        assert!(!app.user.overseas.us_is_pinned("AAPL"));
+        app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+        assert_eq!(app.user.overseas.visible(), ["AAPL", "NVDA", "TSLA"]);
+        app.key(key(KeyCode::Char('t')));
+        let loaded = UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
+        assert_eq!(loaded.overseas.visible(), app.user.overseas.visible());
+        assert!(loaded.overseas.us_is_pinned("AAPL"));
+        let restarted = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+        assert_eq!(
+            restarted.user.overseas.visible(),
+            app.user.overseas.visible()
+        );
+        assert!(restarted.user.overseas.us_is_pinned("AAPL"));
+        app.key(key(KeyCode::Char('d')));
+        app.key(key(KeyCode::Char('y')));
+        assert!(!app.user.overseas.us_is_pinned("AAPL"));
+        assert!(app.user.overseas.subscriptions.contains(&"AAPL".into()));
+        app.user.overseas.group = 0;
+        assert!(app.user.overseas.us_is_pinned("AAPL"));
+        app.user.overseas.us_selected = Some("AAPL".into());
+        app.key(key(KeyCode::Char('d')));
+        app.key(key(KeyCode::Char('y')));
+        assert!(!app.user.overseas.subscriptions.contains(&"AAPL".into()));
+        assert!(
+            app.user
+                .overseas
+                .us_pinned
+                .values()
+                .all(|ids| !ids.contains(&"AAPL".into()))
+        );
+        app.user.overseas.validate().unwrap();
+        UserState::load(&app.paths.data.join("demo-state.json")).unwrap();
+    }
+}
+
+#[test]
+fn us_search_adds_to_current_group_ignores_stale_responses_and_keeps_names_on_restart() {
+    use ticktop::overseas::Page;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    app.set_page(Page::Us);
+    let group = app.user.overseas.group_named("新观察").unwrap();
+    app.user.overseas.group = group;
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        app.key(key(KeyCode::Char('a')));
+        for c in "weiruan".chars() {
+            app.key(key(KeyCode::Char(c)));
+        }
+        assert!(
+            matches!(&app.modal, Some(Modal::UsSearch { results, .. }) if results[0].id == "MSFT")
+        );
+        for (w, h) in [(160, 42), (80, 24), (46, 16)] {
+            assert!(screen(&app, w, h).contains("订阅美股"));
+        }
+        app.key(key(KeyCode::Enter));
+        assert!(app.user.overseas.visible().contains(&"MSFT".into()));
+        assert_eq!(
+            app.user
+                .overseas
+                .subscriptions
+                .iter()
+                .filter(|id| *id == "MSFT")
+                .count(),
+            1
+        );
+    }
+    app.key(key(KeyCode::Char('/')));
+    for c in "international".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    let (generation, query) = app.request().us_search.unwrap();
+    let rows = vec![ticktop::model::Instrument {
+        id: "IBM".into(),
+        name: "International Business Machines".into(),
+    }];
+    app.on_market(MarketEvent::UsSearch {
+        generation: generation - 1,
+        query: query.clone(),
+        rows: rows.clone(),
+        error: None,
+    });
+    assert!(
+        matches!(&app.modal, Some(Modal::UsSearch { results, .. }) if !results.iter().any(|s| s.id == "IBM"))
+    );
+    app.on_market(MarketEvent::UsSearch {
+        generation,
+        query: query.clone(),
+        rows: rows.clone(),
+        error: None,
+    });
+    assert!(matches!(&app.modal, Some(Modal::UsSearch { results, .. }) if results[0].id == "IBM"));
+    app.key(key(KeyCode::Enter));
+    assert_eq!(app.user.overseas.us_selected.as_deref(), Some("IBM"));
+    let restarted = App::new(Config::default(), app.paths.clone(), false, true).unwrap();
+    assert_eq!(
+        restarted.user.overseas.us_names["IBM"],
+        "International Business Machines"
+    );
+    app.key(key(KeyCode::Char('a')));
+    for c in "ZZZZ".chars() {
+        app.key(key(KeyCode::Char(c)));
+    }
+    let (generation, query) = app.request().us_search.unwrap();
+    app.on_market(MarketEvent::UsSearch {
+        generation,
+        query,
+        rows: vec![],
+        error: Some("在线搜索暂不可用".into()),
+    });
+    assert!(
+        matches!(&app.modal, Some(Modal::UsSearch { results, status, .. }) if results[0].id == "ZZZZ" && status.contains("暂不可用"))
+    );
+    app.key(key(KeyCode::Enter));
+    assert!(app.user.overseas.subscriptions.contains(&"ZZZZ".into()));
+    assert!(!app.user.overseas.us_names.contains_key("ZZZZ"));
+    app.key(key(KeyCode::Char('a')));
+    app.key(key(KeyCode::Esc));
+    assert!(app.request().us_search.is_none());
+    app.on_market(MarketEvent::UsSearch {
+        generation,
+        query: "ZZZZ".into(),
+        rows,
+        error: None,
+    });
+    assert!(app.modal.is_none());
+    app.user.overseas.validate().unwrap();
 }

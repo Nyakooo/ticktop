@@ -220,3 +220,48 @@ fn single_day_quote_metadata_uses_exact_previous_close_only_for_one_day() {
             .is_none()
     );
 }
+
+#[test]
+fn us_pins_and_manual_order_are_group_local_and_migrate_legacy_state() {
+    let mut state = overseas::State::default();
+    let group = state.group_named("观察").unwrap();
+    state.groups[0].symbols = state.subscriptions.clone();
+    state.toggle_us_pin("TSLA").unwrap();
+    assert_eq!(state.visible(), ["TSLA", "AAPL", "NVDA"]);
+    assert!(state.move_us_symbol("TSLA", true).is_err());
+    state.toggle_us_pin("NVDA").unwrap();
+    state.move_us_symbol("NVDA", true).unwrap();
+    assert_eq!(state.visible(), ["TSLA", "NVDA", "AAPL"]);
+    let all = state.visible();
+    state.group = group;
+    assert_eq!(state.visible(), ["AAPL", "NVDA", "TSLA"]);
+    assert!(!state.us_is_pinned("TSLA"));
+    state.move_us_symbol("TSLA", false).unwrap();
+    state.toggle_us_pin("AAPL").unwrap();
+    assert_eq!(state.visible(), ["AAPL", "TSLA", "NVDA"]);
+    let before = state.visible();
+    state.move_us_symbol("AAPL", false).unwrap(); // first row is a no-op
+    state.move_us_symbol("NVDA", true).unwrap(); // last row is a no-op
+    assert_eq!(state.visible(), before);
+    assert!(state.toggle_us_pin("MSFT").is_err());
+    state.validate().unwrap();
+    let mut loaded: overseas::State =
+        serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+    assert_eq!(loaded.visible(), before);
+    loaded.group = 0;
+    assert_eq!(loaded.visible(), all);
+    let mut old = serde_json::to_value(&state).unwrap();
+    old.as_object_mut().unwrap().remove("us_pinned");
+    let legacy: overseas::State = serde_json::from_value(old).unwrap();
+    assert!(legacy.us_pinned.is_empty());
+    legacy.validate().unwrap();
+    loaded.us_pinned.insert(999, vec!["AAPL".into()]);
+    assert!(loaded.validate().is_err());
+    loaded.us_pinned.remove(&999);
+    loaded.us_pinned.insert(group, vec!["MSFT".into()]);
+    assert!(loaded.validate().is_err());
+    loaded
+        .us_pinned
+        .insert(group, vec!["AAPL".into(), "AAPL".into()]);
+    assert!(loaded.validate().is_err());
+}

@@ -2021,3 +2021,73 @@ fn shifted_mouse_wheel_cycles_market_pages_without_selecting_entries() {
         app.key(key(KeyCode::Esc));
     }
 }
+
+#[test]
+fn tab_mouse_wheel_cycles_pages_and_ignores_blank_header() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    use ticktop::overseas::Page;
+    let (_dir, mut app) = app();
+    app.modal = None;
+    for mode in [Mode::Full, Mode::Minimal] {
+        app.user.mode = mode;
+        app.set_page(Page::Watch);
+        let stock = app.user.selected.clone();
+        let index = app.user.overseas.index_selected.clone();
+        let us = app.user.overseas.us_selected.clone();
+        for (kind, pages) in [
+            (
+                MouseEventKind::ScrollDown,
+                [Page::Indices, Page::Us, Page::Heatmap, Page::Watch],
+            ),
+            (
+                MouseEventKind::ScrollUp,
+                [Page::Heatmap, Page::Us, Page::Indices, Page::Watch],
+            ),
+        ] {
+            for page in pages {
+                ui::mouse(
+                    &mut app,
+                    MouseEvent {
+                        kind,
+                        column: if mode == Mode::Minimal { 18 } else { 13 },
+                        row: 1,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    160,
+                    42,
+                );
+                assert_eq!(app.page(), page);
+                assert_eq!(app.user.selected, stock);
+                assert_eq!(app.user.overseas.index_selected, index);
+                assert_eq!(app.user.overseas.us_selected, us);
+            }
+        }
+        ui::mouse(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 100,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+            160,
+            42,
+        );
+        assert_eq!(app.page(), Page::Watch);
+        app.key(key(KeyCode::Char('?')));
+        assert!(app.modal.is_some());
+        ui::mouse(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: if mode == Mode::Minimal { 18 } else { 13 },
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+            160,
+            42,
+        );
+        assert_eq!(app.page(), Page::Watch);
+        app.key(key(KeyCode::Esc));
+    }
+}

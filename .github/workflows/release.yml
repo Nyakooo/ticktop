@@ -1,12 +1,20 @@
 name: Release
+
 on:
   push:
     tags: ['v*']
+
 permissions:
   contents: read
 
+# Do not run two publishers for the same version tag concurrently.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
+    name: Publish existing CI artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -18,7 +26,8 @@ jobs:
         run: |
           version="$(awk -F'"' '/^version = / { print $2; exit }' Cargo.toml)"
           test "${GITHUB_REF_NAME#v}" = "$version"
-      - name: Wait for successful CI build of this commit
+
+      - name: Wait for successful CI run on this exact commit
         id: ci
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,7 +61,8 @@ jobs:
           fi
           echo "Using CI run $run_id"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-      - name: Download prebuilt platform artifacts
+
+      - name: Download artifacts from the successful CI run
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -60,7 +70,17 @@ jobs:
           run-id: ${{ steps.ci.outputs.run_id }}
           path: dist
           merge-multiple: true
-      - name: Publish release
+
+      - name: Verify all platform packages and checksums
+        run: |
+          set -euo pipefail
+          count="$(find dist -maxdepth 1 -type f | wc -l)"
+          test "$count" -eq 10
+          for checksum in dist/*.sha256; do
+            (cd dist && sha256sum -c "$(basename "$checksum")")
+          done
+
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -68,6 +88,7 @@ jobs:
         run: gh release create "$TAG" dist/* --verify-tag --title "Ticktop $TAG" --notes-file docs/RELEASE_NOTES.md
 
   verify-windows:
+    name: Verify published Windows install and update
     needs: publish
     runs-on: windows-2022
     timeout-minutes: 30
@@ -94,4 +115,4 @@ jobs:
       - run: python -m pip install pywinpty==3.0.2
       - name: Verify downloaded binary in Windows ConPTY
         shell: powershell
-        run: python scripts/windows_smoke.py (Join-Path $env:RUNNER_TEMP 'Ticktop installed test\\ticktop.exe')
+        run: python scripts/windows_smoke.py (Join-Path $env:RUNNER_TEMP 'Ticktop installed test\ticktop.exe')

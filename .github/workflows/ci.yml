@@ -1,23 +1,59 @@
 name: CI
+
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - '**/*.md'
+      - 'README*'
+      - 'docs/**'
+      - 'LICENSE*'
+      - '.github/workflows/**'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'README*'
+      - 'docs/**'
+      - 'LICENSE*'
+      - '.github/workflows/**'
+
 permissions:
   contents: read
 
+# A newer commit on the same branch supersedes an unfinished CI run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
+    name: Quality and tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Run Rust tests once
+        run: cargo test --locked
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test dependencies
+        run: python -m pip install -r scripts/requirements-smoke.txt
+      - name: Run terminal parser and installer regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
 
   build:
+    name: Build ${{ matrix.target }}
     needs: quality
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     strategy:
@@ -44,15 +80,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: actions/setup-python@v5
-        if: matrix.target == 'x86_64-unknown-linux-musl' || runner.os == 'Windows'
+      - name: Set up Python for platform smoke tests
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools zsh
+          sudo apt-get install -y musl-tools
+          if [[ '${{ matrix.target }}' == 'x86_64-unknown-linux-musl' ]]; then
+            sudo apt-get install -y zsh
+          fi
           target='${{ matrix.target }}'
           echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
           upper_target="${target^^}"
@@ -60,36 +100,25 @@ jobs:
       - name: Configure static Windows runtime
         if: runner.os == 'Windows'
         run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> "$GITHUB_ENV"
-      - name: Run platform tests
-        run: cargo test --locked --target '${{ matrix.target }}'
-      - name: Build release binary
+      - name: Build release binary once
         run: cargo build --locked --release --target '${{ matrix.target }}'
-      - name: Install Linux smoke-test dependencies
+      - name: Run Linux terminal smoke tests
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          python3 -m pip install -r scripts/requirements-smoke.txt
-      - name: Terminal screen parser and installer regression tests
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Terminal PTY smoke with fragmented output
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        env:
-          TICKTOP_SMOKE_READ_SIZE: '257'
-        run: python3 scripts/pty_smoke.py target/${{ matrix.target }}/release/ticktop
-      - name: Terminal mode persistence smoke
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: python3 scripts/mode_smoke.py target/${{ matrix.target }}/release/ticktop
-      - name: Windows installer regression tests
+          python -m pip install -r scripts/requirements-smoke.txt
+          python scripts/pty_smoke.py target/${{ matrix.target }}/release/ticktop
+          python scripts/mode_smoke.py target/${{ matrix.target }}/release/ticktop
+      - name: Run Windows installer regression tests
         if: runner.os == 'Windows'
         shell: powershell
         run: ./tests/installer_windows.ps1
       - name: Install Windows ConPTY test dependency
         if: runner.os == 'Windows'
         run: python -m pip install pywinpty==3.0.2
-      - name: Windows ConPTY smoke
+      - name: Run Windows ConPTY smoke test
         if: runner.os == 'Windows'
         run: python scripts/windows_smoke.py target/${{ matrix.target }}/release/ticktop.exe
-      - name: Package Unix
+      - name: Package Unix artifact
         if: runner.os != 'Windows'
         env:
           TARGET: ${{ matrix.target }}
@@ -105,7 +134,7 @@ jobs:
             shasum -a 256 "ticktop-$TARGET.tar.gz" > "ticktop-$TARGET.tar.gz.sha256"
           fi
           rm ticktop
-      - name: Package Windows
+      - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: powershell
         run: |

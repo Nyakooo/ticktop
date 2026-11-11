@@ -1,52 +1,123 @@
 name: CI
 on:
   push:
-    # CI is for branch updates; version tags are validated by release.yml.
-    tags-ignore:
-      - '**'
+    branches: [master]
   pull_request:
 permissions:
   contents: read
+
 jobs:
-  check:
+  quality:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: sudo apt-get update && sudo apt-get install -y zsh
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python3 -m pip install -r scripts/requirements-smoke.txt
-      - name: Terminal screen parser and installer regression tests
-        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Terminal PTY smoke with fragmented output
-        env:
-          TICKTOP_SMOKE_READ_SIZE: '257'
-        run: python3 scripts/pty_smoke.py
-      - run: python3 scripts/mode_smoke.py
 
-  windows:
-    runs-on: windows-2022
+  build:
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
-      - run: cargo build --locked
-      - name: Windows PowerShell installer regression tests
+          targets: ${{ matrix.target }}
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools zsh
+          target='${{ matrix.target }}'
+          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
+          upper_target="${target^^}"
+          echo "CARGO_TARGET_${upper_target//-/_}_LINKER=musl-gcc" >> "$GITHUB_ENV"
+      - name: Configure static Windows runtime
+        if: runner.os == 'Windows'
+        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Run platform tests
+        run: cargo test --locked --target '${{ matrix.target }}'
+      - name: Build release binary
+        run: cargo build --locked --release --target '${{ matrix.target }}'
+      - name: Install Linux smoke-test dependencies
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          python3 -m pip install -r scripts/requirements-smoke.txt
+      - name: Terminal screen parser and installer regression tests
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Terminal PTY smoke with fragmented output
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        env:
+          TICKTOP_SMOKE_READ_SIZE: '257'
+        run: python3 scripts/pty_smoke.py target/${{ matrix.target }}/release/ticktop
+      - name: Terminal mode persistence smoke
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: python3 scripts/mode_smoke.py target/${{ matrix.target }}/release/ticktop
+      - name: Windows installer regression tests
+        if: runner.os == 'Windows'
         shell: powershell
         run: ./tests/installer_windows.ps1
-      - uses: actions/setup-python@v5
+      - name: Install Windows ConPTY test dependency
+        if: runner.os == 'Windows'
+        run: python -m pip install pywinpty==3.0.2
+      - name: Windows ConPTY smoke
+        if: runner.os == 'Windows'
+        run: python scripts/windows_smoke.py target/${{ matrix.target }}/release/ticktop.exe
+      - name: Package Unix
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p dist
+          cp "target/$TARGET/release/ticktop" dist/ticktop
+          cd dist
+          ./ticktop --version
+          tar -czf "ticktop-$TARGET.tar.gz" ticktop
+          if command -v sha256sum >/dev/null; then
+            sha256sum "ticktop-$TARGET.tar.gz" > "ticktop-$TARGET.tar.gz.sha256"
+          else
+            shasum -a 256 "ticktop-$TARGET.tar.gz" > "ticktop-$TARGET.tar.gz.sha256"
+          fi
+          rm ticktop
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $target = '${{ matrix.target }}'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/$target/release/ticktop.exe" dist/ticktop.exe
+          & ./dist/ticktop.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Binary smoke failed' }
+          $asset = "ticktop-$target.zip"
+          Compress-Archive -LiteralPath dist/ticktop.exe -DestinationPath "dist/$asset"
+          $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path (Resolve-Path dist) "$asset.sha256"), "$hash  $asset`n")
+          Remove-Item dist/ticktop.exe
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: '3.12'
-      - run: python -m pip install pywinpty==3.0.2
-      - run: python scripts/windows_smoke.py target/debug/ticktop.exe
+          name: ticktop-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90

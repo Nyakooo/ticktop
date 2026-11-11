@@ -1,6 +1,9 @@
 name: CI
 on:
   push:
+    # CI is for branch updates; version tags are validated by release.yml.
+    tags-ignore:
+      - '**'
   pull_request:
 permissions:
   contents: read

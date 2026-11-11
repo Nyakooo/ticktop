@@ -381,10 +381,12 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn quote(&self, session: Session) -> Option<&Quote> {
         if session == Session::All {
-            self.phases
-                .values()
-                .chain(std::iter::once(&self.regular))
-                .max_by_key(|q| (q.time, q.session))
+            let quotes = || self.phases.values().chain(std::iter::once(&self.regular));
+            let latest = quotes().max_by_key(|q| (q.time, q.session))?;
+            quotes()
+                .filter(|q| q.source == "Nasdaq" && q.time >= latest.time - 300)
+                .max_by_key(|q| q.time)
+                .or(Some(latest))
         } else if session == Session::Regular {
             Some(&self.regular)
         } else {
@@ -398,6 +400,111 @@ impl Snapshot {
             .collect()
     }
 }
+/// Select only quotes belonging to the current New York trading window.
+pub fn current_us_session(now: DateTime<Utc>) -> Option<Session> {
+    use chrono::{Datelike, Timelike, Weekday};
+    let local = now.with_timezone(&chrono_tz::America::New_York);
+    let day = local.weekday();
+    let minutes = local.hour() * 60 + local.minute();
+    let weekday = !matches!(day, Weekday::Sat | Weekday::Sun);
+    match minutes {
+        0..240 if weekday => Some(Session::Overnight),
+        240..570 if weekday => Some(Session::Pre),
+        570..960 if weekday => Some(Session::Regular),
+        960..1200 if weekday => Some(Session::Post),
+        1200..1440 if !matches!(day, Weekday::Fri | Weekday::Sat) => Some(Session::Overnight),
+        _ => None,
+    }
+}
+
+pub(crate) fn us_session_at(snapshot: Option<&Snapshot>, now: DateTime<Utc>) -> Option<Session> {
+    snapshot
+        .and_then(|s| {
+            s.intervals
+                .iter()
+                .find(|w| (w.start..w.end).contains(&now.timestamp()))
+        })
+        .map(|w| w.session)
+        .or_else(|| current_us_session(now))
+}
+
+fn new_york_date(time: i64) -> Option<chrono::NaiveDate> {
+    DateTime::from_timestamp(time, 0).map(|time| {
+        time.with_timezone(&chrono_tz::America::New_York)
+            .date_naive()
+    })
+}
+
+pub fn current_us_quote<'a>(
+    snapshot: Option<&'a Snapshot>,
+    night: Option<&'a Quote>,
+    now: DateTime<Utc>,
+) -> Option<&'a Quote> {
+    let session = us_session_at(snapshot, now)?;
+    let candidate = if session == Session::Overnight {
+        night
+    } else {
+        snapshot.and_then(|s| s.quote(session))
+    }?;
+    let in_source_window = candidate.session == session
+        && candidate.time <= now.timestamp()
+        && snapshot.is_some_and(|s| {
+            s.intervals.iter().any(|w| {
+                w.session == session
+                    && (w.start..w.end).contains(&now.timestamp())
+                    && (w.start..w.end).contains(&candidate.time)
+            })
+        });
+    (in_source_window || current_us_quote_in_window(candidate, session, now)).then_some(candidate)
+}
+
+fn current_us_quote_in_window(candidate: &Quote, session: Session, now: DateTime<Utc>) -> bool {
+    use chrono::Timelike;
+    if candidate.session != session || candidate.time > now.timestamp() {
+        return false;
+    }
+    let local = now.with_timezone(&chrono_tz::America::New_York);
+    let Some(quoted) = DateTime::from_timestamp(candidate.time, 0) else {
+        return false;
+    };
+    let quoted = quoted.with_timezone(&chrono_tz::America::New_York);
+    let same_day = quoted.date_naive() == local.date_naive();
+    match session {
+        Session::Pre => {
+            same_day && (4 * 60..9 * 60 + 30).contains(&(quoted.hour() * 60 + quoted.minute()))
+        }
+        Session::Regular => {
+            same_day && (9 * 60 + 30..16 * 60).contains(&(quoted.hour() * 60 + quoted.minute()))
+        }
+        Session::Post => {
+            same_day && (16 * 60..20 * 60).contains(&(quoted.hour() * 60 + quoted.minute()))
+        }
+        Session::Overnight => {
+            let age = now.timestamp() - candidate.time;
+            age < 8 * 3600 && (quoted.hour() >= 20 || quoted.hour() < 4)
+        }
+        Session::All => false,
+    }
+}
+/// Fall back to the last known trade, preserving its original session and time.
+pub fn display_us_quote<'a>(
+    snapshot: Option<&'a Snapshot>,
+    night: Option<&'a Quote>,
+    now: DateTime<Utc>,
+) -> Option<&'a Quote> {
+    current_us_quote(snapshot, night, now).or_else(|| {
+        snapshot
+            .into_iter()
+            .flat_map(|s| s.phases.values().chain(std::iter::once(&s.regular)))
+            .chain(night.filter(|q| {
+                DateTime::from_timestamp(q.time, 0).and_then(current_us_session)
+                    == Some(Session::Overnight)
+            }))
+            .filter(|q| q.time <= now.timestamp())
+            .max_by_key(|q| q.time)
+    })
+}
+
 fn positive(v: &Value) -> Option<f64> {
     v.as_f64().filter(|n| n.is_finite() && *n > 0. && *n < 1e12)
 }
@@ -485,12 +592,19 @@ pub fn parse_chart(value: &Value, id: &str, period: Period) -> Result<Snapshot> 
     }
     windows.sort_by_key(|w| (w.start, w.end));
     windows.dedup_by_key(|w| (w.start, w.end, w.session));
-    let timestamps = a
-        .get("timestamp")
-        .and_then(Value::as_array)
-        .context("missing timestamps")?;
     let q = &a["indicators"]["quote"][0];
-    let close = q["close"].as_array().context("missing closes")?;
+    let (timestamps, close): (&[Value], &[Value]) =
+        match (a["timestamp"].as_array(), q["close"].as_array()) {
+            (Some(timestamps), Some(close)) => (timestamps, close),
+            (None, _)
+                if a["timestamp"].is_null()
+                    && expected == "EQUITY"
+                    && period == Period::Intraday =>
+            {
+                (&[], &[])
+            }
+            _ => bail!("missing chart timestamps or closes"),
+        };
     if timestamps.len() != close.len() {
         bail!("chart length mismatch");
     }
@@ -542,10 +656,11 @@ pub fn parse_chart(value: &Value, id: &str, period: Period) -> Result<Snapshot> 
                 session,
                 Quote {
                     price,
-                    reference: if session == Session::Pre && t < time {
-                        reference
-                    } else {
-                        Some(regular_price)
+                    reference: match (session, new_york_date(t) == new_york_date(time)) {
+                        (Session::Pre, true) => reference,
+                        (Session::Pre, false) if t > time => Some(regular_price),
+                        (Session::Post, true) => Some(regular_price),
+                        _ => None,
                     },
                     time: t,
                     session,
@@ -594,6 +709,198 @@ pub async fn fetch_chart(http: &reqwest::Client, id: &str, period: Period) -> Re
         .await?;
     parse_chart(&value, id, period)
 }
+/// Nasdaq's website quote contains a price, change and timestamp for the active session.
+pub fn parse_nasdaq_quote(value: &Value, id: &str) -> Result<Quote> {
+    use chrono::TimeZone;
+    let data = &value["data"];
+    if data["symbol"].as_str() != Some(id) {
+        bail!("symbol mismatch");
+    }
+    let session = match data["marketStatus"].as_str().unwrap_or("") {
+        "Pre-Market" => Session::Pre,
+        "After-Hours" => Session::Post,
+        "Market Open" | "Market Closed" | "Closed" => Session::Regular,
+        _ => bail!("unknown market status"),
+    };
+    let row = &data["primaryData"];
+    let number = |key: &str| -> Option<f64> {
+        row[key]
+            .as_str()?
+            .replace(['$', ',', '%'], "")
+            .parse::<f64>()
+            .ok()
+            .filter(|n| n.is_finite())
+    };
+    let price = number("lastSalePrice")
+        .filter(|n| *n > 0.)
+        .context("missing price")?;
+    let change = number("netChange").context("missing change")?;
+    let reference = (price - change > 0.)
+        .then_some(price - change)
+        .context("invalid reference")?;
+    let timestamp = row["lastTradeTimestamp"]
+        .as_str()
+        .context("missing timestamp")?
+        .trim_start_matches("Closed at ")
+        .trim_end_matches(" ET");
+    let local = chrono::NaiveDateTime::parse_from_str(timestamp, "%b %d, %Y %l:%M %p")?;
+    let time = chrono_tz::America::New_York
+        .from_local_datetime(&local)
+        .single()
+        .context("ambiguous source time")?
+        .timestamp();
+    Ok(Quote {
+        price,
+        reference: Some(reference),
+        time,
+        session,
+        source: "Nasdaq".into(),
+    })
+}
+
+pub fn parse_nasdaq_extended(value: &Value, session: Session) -> Result<Quote> {
+    use chrono::TimeZone;
+    let data = &value["data"];
+    let updated = data["lastUpdateInfo"]
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .find_map(|row| row.strip_prefix("Data last updated ")?.strip_suffix(" ET."))
+        })
+        .context("missing extended session date")?;
+    let updated = chrono::NaiveDateTime::parse_from_str(updated, "%b %d, %Y %l:%M %p")?;
+    let row = &data["tradeDetailTable"]["rows"][0];
+    let traded = chrono::NaiveTime::parse_from_str(
+        row["time"]
+            .as_str()
+            .context("missing extended trade time")?,
+        "%H:%M:%S",
+    )?;
+    let time = chrono_tz::America::New_York
+        .from_local_datetime(&updated.date().and_time(traded))
+        .single()
+        .context("ambiguous source time")?
+        .timestamp();
+    anyhow::ensure!(
+        current_us_session(DateTime::from_timestamp(time, 0).context("invalid source time")?)
+            == Some(session),
+        "trade outside extended session"
+    );
+    let number = |value: &str| value.replace(['$', ','], "").parse::<f64>().ok();
+    let price = row["price"]
+        .as_str()
+        .and_then(number)
+        .filter(|p| p.is_finite() && *p > 0.)
+        .context("missing extended trade price")?;
+    let reference = data["previousInfo"]
+        .as_str()
+        .and_then(|text| text.rsplit_once('$'))
+        .and_then(|(_, price)| number(price.trim()))
+        .or_else(|| {
+            let mut fields = data["infoTable"]["rows"][0]["consolidated"]
+                .as_str()?
+                .split_whitespace();
+            let price = number(fields.next()?)?;
+            let change = number(fields.next()?)?;
+            Some(price - change)
+        })
+        .filter(|p| p.is_finite() && *p > 0.);
+    Ok(Quote {
+        price,
+        reference,
+        time,
+        session,
+        source: "Nasdaq".into(),
+    })
+}
+
+pub(crate) fn merge_us_quote(snapshot: &mut Snapshot, mut quote: Quote) {
+    if quote.session == Session::Post
+        && quote.reference.is_none()
+        && snapshot.regular.time <= quote.time
+        && new_york_date(snapshot.regular.time) == new_york_date(quote.time)
+    {
+        quote.reference = Some(snapshot.regular.price);
+    }
+    if quote.time > Utc::now().timestamp() {
+        return;
+    }
+    if snapshot
+        .quote(quote.session)
+        .is_some_and(|existing| existing.time > quote.time)
+    {
+        return;
+    }
+    if quote.session == Session::Regular {
+        snapshot.regular = quote;
+    } else {
+        snapshot.phases.insert(quote.session, quote);
+    }
+}
+
+async fn nasdaq_data(
+    http: &reqwest::Client,
+    id: &str,
+    endpoint: &str,
+    market: Option<&str>,
+) -> Result<Value> {
+    if !valid_symbol(id) {
+        bail!("invalid symbol");
+    }
+    let mut url = reqwest::Url::parse("https://api.nasdaq.com/api/quote/")?;
+    url.path_segments_mut()
+        .map_err(|_| anyhow::anyhow!("invalid url"))?
+        .pop_if_empty()
+        .push(id)
+        .push(endpoint);
+    url.query_pairs_mut().append_pair("assetclass", "stocks");
+    if let Some(market) = market {
+        url.query_pairs_mut().append_pair("markettype", market);
+    }
+    Ok(http
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0")
+        .header("Accept", "application/json")
+        .header("Origin", "https://www.nasdaq.com")
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<Value>()
+        .await?)
+}
+
+pub async fn fetch_nasdaq_quote(http: &reqwest::Client, id: &str) -> Result<Quote> {
+    let session = current_us_session(Utc::now());
+    let market = match session {
+        Some(Session::Pre) => Some("pre"),
+        Some(Session::Post) => Some("post"),
+        _ => None,
+    };
+    let info = nasdaq_data(http, id, "info", None)
+        .await
+        .and_then(|data| parse_nasdaq_quote(&data, id));
+    if let (Some(session), Some(market)) = (session, market) {
+        if info.as_ref().is_ok_and(|quote| {
+            current_us_quote_in_window(quote, session, Utc::now())
+                && Utc::now().timestamp() - quote.time <= 180
+        }) {
+            return info;
+        }
+        if let Ok(data) = nasdaq_data(http, id, "extended-trading", Some(market)).await
+            && let Ok(quote) = parse_nasdaq_extended(&data, session)
+            && current_us_quote_in_window(&quote, session, Utc::now())
+            && !info.as_ref().is_ok_and(|primary| {
+                current_us_quote_in_window(primary, session, Utc::now())
+                    && primary.time >= quote.time
+            })
+        {
+            return Ok(quote);
+        }
+    }
+    info
+}
+
 /// Yahoo embeds its server responses as JSON scripts, whose body is itself JSON.
 /// Scope extraction to exact symbols and choose the latest timestamp; related stocks and
 /// differently-scaled percent fields must never leak into the selected quote.

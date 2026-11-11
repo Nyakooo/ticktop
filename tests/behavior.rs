@@ -1591,7 +1591,7 @@ fn market_pages_keep_selections_periods_and_h_return_independent() {
     app.key(key(KeyCode::Char('j')));
     assert_eq!(app.user.overseas.us_selected.as_deref(), Some("NVDA"));
     app.key(key(KeyCode::Tab));
-    assert_eq!(app.user.overseas.session, Session::Pre);
+    assert_eq!(app.user.overseas.session, Session::All);
     app.key(key(KeyCode::Char('1')));
     assert_eq!(app.user.selected, stock);
     assert_eq!(app.user.period, period);
@@ -1648,7 +1648,7 @@ fn overseas_subscription_group_alias_pause_and_minimal_render() {
     app.key(key(KeyCode::Char(' ')));
     assert_eq!(app.overseas_quote("MSFT").unwrap().price, 123.);
     app.user.overseas.session = Session::Overnight;
-    assert!(app.overseas_quote("MSFT").is_none());
+    assert_eq!(app.overseas_quote("MSFT").unwrap().price, 123.);
     for mode in [Mode::Full, Mode::Minimal] {
         app.user.mode = mode;
         for (w, h) in [(160, 42), (100, 30), (80, 24), (46, 16)] {

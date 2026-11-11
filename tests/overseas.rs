@@ -265,3 +265,178 @@ fn us_pins_and_manual_order_are_group_local_and_migrate_legacy_state() {
         .insert(group, vec!["AAPL".into(), "AAPL".into()]);
     assert!(loaded.validate().is_err());
 }
+
+#[test]
+fn nasdaq_premarket_uses_extended_reference_and_source_time() {
+    let v = json!({"data":{"symbol":"NVDA","marketStatus":"Pre-Market","primaryData":{"lastSalePrice":"$176.49","netChange":"+7.60","lastTradeTimestamp":"Nov 11, 2026 4:57 AM ET"}}});
+    let q = overseas::parse_nasdaq_quote(&v, "NVDA").unwrap();
+    assert_eq!(q.session, Session::Pre);
+    assert!((q.percent().unwrap() - 4.50).abs() < 0.02);
+    assert_eq!(q.time, 1794391020);
+}
+
+#[test]
+fn nasdaq_rejects_unverified_data_and_handles_summer_postmarket() {
+    let mut v = json!({"data":{"symbol":"AAPL","marketStatus":"After-Hours","primaryData":{"lastSalePrice":"$110.00","netChange":"+10.00","lastTradeTimestamp":"Jul 10, 2026 4:30 PM ET"}}});
+    let q = overseas::parse_nasdaq_quote(&v, "AAPL").unwrap();
+    assert_eq!(q.session, Session::Post);
+    assert_eq!(q.time, 1783715400);
+    assert!((q.percent().unwrap() - 10.).abs() < 1e-9);
+    assert!(overseas::parse_nasdaq_quote(&v, "NVDA").is_err());
+    v["data"]["marketStatus"] = json!("unknown");
+    assert!(overseas::parse_nasdaq_quote(&v, "AAPL").is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires public Nasdaq website endpoint"]
+async fn live_nasdaq_quote() {
+    let http = ticktop::market::client(&ticktop::config::Config::default().network).unwrap();
+    let q = overseas::fetch_nasdaq_quote(&http, "NVDA").await.unwrap();
+    assert!(q.price > 0. && q.reference.is_some());
+    println!("{} {} {:?} {:?}", q.price, q.time, q.session, q.percent());
+}
+
+#[test]
+fn current_premarket_does_not_select_later_cached_overnight() {
+    use chrono::{TimeZone, Utc};
+    let now = Utc.with_ymd_and_hms(2026, 11, 11, 10, 8, 0).unwrap();
+    let mut snapshot = overseas::demo("NVDA", Period::Intraday);
+    snapshot.intervals.clear();
+    snapshot.phases.clear();
+    let pre = overseas::Quote {
+        price: 176.69,
+        reference: Some(168.89),
+        time: now.timestamp() - 60,
+        session: Session::Pre,
+        source: "Nasdaq".into(),
+    };
+    let night = overseas::Quote {
+        price: 170.,
+        reference: Some(168.89),
+        time: now.timestamp(),
+        session: Session::Overnight,
+        source: "Yahoo".into(),
+    };
+    snapshot.phases.insert(Session::Pre, pre);
+    assert_eq!(
+        overseas::current_us_quote(Some(&snapshot), Some(&night), now)
+            .unwrap()
+            .session,
+        Session::Pre
+    );
+    snapshot.phases.clear();
+    snapshot.regular.session = Session::Regular;
+    assert!(overseas::current_us_quote(Some(&snapshot), Some(&night), now).is_none());
+}
+
+#[test]
+fn automatic_us_session_respects_dst_and_weekend() {
+    use chrono::{TimeZone, Utc};
+    for (date, expected) in [
+        ((2026, 11, 11, 8, 59), Session::Overnight),
+        ((2026, 11, 11, 9, 0), Session::Pre),
+        ((2026, 7, 10, 8, 0), Session::Pre),
+        ((2026, 7, 10, 13, 30), Session::Regular),
+        ((2026, 7, 10, 20, 0), Session::Post),
+    ] {
+        let (y, m, d, h, min) = date;
+        assert_eq!(
+            overseas::current_us_session(Utc.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()),
+            Some(expected)
+        );
+    }
+    assert_eq!(
+        overseas::current_us_session(Utc.with_ymd_and_hms(2026, 11, 14, 15, 0, 0).unwrap()),
+        None
+    );
+}
+
+#[test]
+fn yahoo_premarket_uses_last_regular_close_before_open() {
+    let mut v = fixture();
+    let root = &mut v["chart"]["result"][0];
+    root["meta"]["regularMarketTime"] = json!(1793653200_i64);
+    root["meta"]["regularMarketPrice"] = json!(100.);
+    root["meta"]["previousClose"] = json!(111.5);
+    root["timestamp"] = json!([1793696400_i64]);
+    root["indicators"]["quote"][0]["close"] = json!([103.7]);
+    let snapshot = overseas::parse_chart(&v, "AAPL", Period::Intraday).unwrap();
+    assert!((snapshot.quote(Session::Pre).unwrap().percent().unwrap() - 3.7).abs() < 1e-9);
+    v["chart"]["result"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("timestamp");
+    assert!(
+        overseas::parse_chart(&v, "AAPL", Period::Intraday)
+            .unwrap()
+            .bars
+            .is_empty()
+    );
+}
+
+#[test]
+fn nasdaq_extended_uses_trade_time_and_regular_close() {
+    let v = json!({"data":{
+        "previousInfo":" Market Close: $100.00",
+        "lastUpdateInfo":["This page refreshes every 30 seconds.", "Data last updated Nov 11, 2026 05:10 AM ET."],
+        "tradeDetailTable":{"rows":[{"time":"04:56:26","price":"$103.70"}]}
+    }});
+    let quote = overseas::parse_nasdaq_extended(&v, Session::Pre).unwrap();
+    assert_eq!(quote.time, 1794390986);
+    assert!((quote.percent().unwrap() - 3.7).abs() < 1e-9);
+    assert!(overseas::parse_nasdaq_extended(&v, Session::Post).is_err());
+}
+
+#[test]
+fn missing_current_quote_keeps_last_trade_and_its_original_session() {
+    use chrono::{TimeZone, Utc};
+    let now = Utc.with_ymd_and_hms(2026, 11, 11, 10, 8, 0).unwrap();
+    let night = overseas::Quote {
+        price: 174.07,
+        reference: Some(168.89),
+        time: 1794387598,
+        session: Session::Overnight,
+        source: "Yahoo / Blue Ocean ATS".into(),
+    };
+    assert!(overseas::current_us_quote(None, Some(&night), now).is_none());
+    let quote = overseas::display_us_quote(None, Some(&night), now).unwrap();
+    assert_eq!(quote.session, Session::Overnight);
+    assert_eq!(quote.time, night.time);
+}
+
+#[test]
+fn source_intervals_select_postmarket_after_an_early_close() {
+    use chrono::{TimeZone, Utc};
+    let at = |hour, minute| Utc.with_ymd_and_hms(2026, 11, 27, hour, minute, 0).unwrap();
+    let mut snapshot = overseas::demo("NVDA", Period::Intraday);
+    snapshot.intervals = vec![overseas::Interval {
+        start: at(18, 0).timestamp(),
+        end: at(22, 0).timestamp(),
+        session: Session::Post,
+    }];
+    snapshot.phases.insert(
+        Session::Post,
+        overseas::Quote {
+            time: at(18, 1).timestamp(),
+            price: 101.,
+            reference: Some(100.),
+            session: Session::Post,
+            source: "Yahoo".into(),
+        },
+    );
+    assert_eq!(
+        overseas::current_us_quote(Some(&snapshot), None, at(18, 5))
+            .unwrap()
+            .session,
+        Session::Post,
+    );
+}
+
+#[test]
+fn previous_days_postmarket_does_not_use_todays_regular_price() {
+    let mut v = fixture();
+    let root = &mut v["chart"]["result"][0];
+    root["meta"]["regularMarketTime"] = json!(1793826000_i64);
+    let snapshot = overseas::parse_chart(&v, "AAPL", Period::Intraday).unwrap();
+    assert_eq!(snapshot.quote(Session::Post).unwrap().reference, None);
+}

@@ -116,7 +116,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 .find(|g| g.id == state.group)
                 .map(|g| g.name.as_str())
                 .unwrap_or("全部订阅");
-            format!("{group}   {} · Tab 切时段", state.session.label())
+            format!("{group}   {} · 自动时段", app.active_us_session().label())
         };
         frame.render_widget(
             Paragraph::new(label).style(Style::default().fg(p.dim)),
@@ -227,7 +227,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "m 简约  h 云图  j/k 选择  Enter 走势  a 添加  d 移除  t 置顶  Alt+↑↓ 排序  e 别名  ?  q"
         }
     } else if overseas {
-        "m 简约  h 云图  j/k 选择  ←→ 周期  Tab 时段  t 置顶  Alt+↑↓ 排序  a 订阅  e 别名  g 分组  ? 帮助  q 退出"
+        "m 简约  h 云图  j/k 选择  ←→ 周期  自动时段  t 置顶  Alt+↑↓ 排序  a 订阅  e 别名  g 分组  ? 帮助  q 退出"
     } else if app.user.heatmap {
         if app.user.mode == Mode::Minimal {
             "m mode  h back     Tab type  n/p page  s sort  mouse  i index  i index  , cfg  ?  q"
@@ -1678,7 +1678,7 @@ fn modal_view(f: &mut Frame, app: &App, modal: &Modal, p: Palette) {
                 "↑↓ / PgUp/PgDn 滚动帮助；Esc 返回",
                 "1 自选 / 2 指数 / 3 美股 / 4 云图（可鼠标点击）",
                 "m 完整/简约 · h 云图/返回前页 · [ ] 当前市场分组",
-                "美股 Tab 切时段 · a / / 模糊搜索订阅 · g 分组选择/创建 · G 加入分组",
+                "美股自动时段 · a / / 模糊搜索订阅 · g 分组选择/创建 · G 加入分组",
                 "美股 t 置顶 · Alt+↑↓ 排序 · e 别名 · r 重命名分组 · d 移除（确认）",
                 "指数 Tab 我的关注/全部 · Enter 走势 · Esc 总览",
                 "指数 a 添加（中文/代码/拼音）· d 取消关注 · t 置顶 · Alt+↑↓ 排序",

@@ -143,8 +143,11 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             ];
             if !index {
                 cells.push(
-                    q.map(|q| q.session.label().to_string())
-                        .unwrap_or_else(|| "--".into()),
+                    q.map(|q| {
+                        let cached = !app.overseas_quote_is_current(id, chrono::Utc::now());
+                        format!("{}{}", q.session.label(), if cached { "*" } else { "" })
+                    })
+                    .unwrap_or_else(|| "--".into()),
                 );
             }
             Row::new(cells).style(Style::default().fg(pct.map(|v| p.change(v)).unwrap_or(p.fg)))
@@ -247,15 +250,15 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
             q.source,
             q.session.label(),
             overseas::source_time(q.time),
-            if age > 180 {
-                "历史快照；非当前报价"
+            if age > 180 || (!index && !app.overseas_quote_is_current(id, chrono::Utc::now())) {
+                "最近可用快照"
             } else {
                 "公开报价；非保证实时"
             },
             age
         )
     } else {
-        "当前阶段暂无报价；不会以其他阶段价格替代".into()
+        "暂无可用报价".into()
     };
     f.render_widget(
         Paragraph::new(context).style(Style::default().fg(p.dim)),
@@ -265,14 +268,10 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         let mut lines = vec![Line::from(format!(
             "{} / {}",
             app.user.overseas.period().label(),
-            app.user.overseas.session.label()
+            app.active_us_session().label()
         ))];
         if let Some(s) = app.overseas_series() {
-            let bars = s.bars(if index {
-                Session::All
-            } else {
-                app.user.overseas.session
-            });
+            let bars = app.overseas_chart_bars(s);
             if let Some(bar) = bars.get(app.overseas_cursor.unwrap_or(bars.len().saturating_sub(1)))
             {
                 lines.push(Line::from(format!(
@@ -317,7 +316,7 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
         f.render_widget(Paragraph::new(Line::from(tabs)), rows[2]);
         chart(f, app, rows[3], p, index);
     }
-    let note = if app.user.overseas.session == Session::Overnight && !index {
+    let note = if app.active_us_session() == Session::Overnight && !index {
         "夜盘仅展示可获取报价，暂无历史分钟曲线；来源 Blue Ocean ATS"
     } else {
         "Shift+←→ 游标 · Home/End 首末 · 缺失数据不补线"
@@ -325,11 +324,7 @@ pub(crate) fn draw(f: &mut Frame, app: &App, r: Rect, p: Palette) {
     let readout = app
         .overseas_series()
         .and_then(|s| {
-            let bars = s.bars(if index {
-                Session::All
-            } else {
-                app.user.overseas.session
-            });
+            let bars = app.overseas_chart_bars(s);
             bars.get(app.overseas_cursor.unwrap_or(bars.len().saturating_sub(1)))
                 .map(|b| {
                     format!(
@@ -363,18 +358,11 @@ fn chart(f: &mut Frame, app: &App, r: Rect, p: Palette, index: bool) {
         return;
     };
     let period = snapshot.period;
-    let session = if index || period != Period::Intraday {
-        Session::All
-    } else {
-        app.user.overseas.session
-    };
-    let bars = snapshot.bars(session);
-    if bars.is_empty()
-        || (!index && period == Period::Intraday && app.user.overseas.session == Session::Overnight)
-    {
+    let session = app.overseas_chart_session(period);
+    let bars = app.overseas_chart_bars(snapshot);
+    if bars.is_empty() {
         f.render_widget(
-            Paragraph::new("当前阶段暂无历史走势\n不会用盘后走势代替夜盘")
-                .style(Style::default().fg(p.dim)),
+            Paragraph::new("当前阶段暂无历史走势").style(Style::default().fg(p.dim)),
             r,
         );
         return;

@@ -59,24 +59,82 @@ impl App {
         let s = &self.user.overseas;
         self.overseas.get(&(s.selected()?.into(), s.period()))
     }
-    pub fn overseas_quote(&self, id: &str) -> Option<&overseas::Quote> {
-        let session = if self.page() == Page::Us {
-            self.user.overseas.session
-        } else {
-            Session::Regular
-        };
-        let quote = self
-            .overseas
+    fn overseas_quote_snapshot(&self, id: &str) -> Option<&overseas::Snapshot> {
+        self.overseas
             .get(&(id.to_string(), crate::model::Period::Intraday))
             .or_else(|| self.overseas_snapshot(id))
-            .and_then(|s| s.quote(session));
-        let night = if matches!(session, Session::All | Session::Overnight) {
-            self.nights.get(id)
-        } else {
-            None
-        };
-        quote.into_iter().chain(night).max_by_key(|q| q.time)
     }
+
+    pub fn overseas_quote_is_current(&self, id: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+        self.demo
+            || overseas::current_us_quote(
+                self.overseas_quote_snapshot(id),
+                self.nights.get(id),
+                now,
+            )
+            .is_some()
+    }
+
+    pub fn overseas_quote(&self, id: &str) -> Option<&overseas::Quote> {
+        let snapshot = self.overseas_quote_snapshot(id);
+        if self.page() != Page::Us {
+            return snapshot.and_then(|s| s.quote(Session::Regular));
+        }
+        if self.demo {
+            return snapshot.and_then(|s| s.quote(Session::All));
+        }
+        overseas::display_us_quote(snapshot, self.nights.get(id), chrono::Utc::now())
+    }
+
+    pub fn active_us_session(&self) -> Session {
+        if self.demo || self.page() != Page::Us {
+            return self
+                .user
+                .overseas
+                .selected()
+                .and_then(|id| self.overseas_quote(id))
+                .map_or(Session::All, |q| q.session);
+        }
+        let snapshot = self
+            .user
+            .overseas
+            .selected()
+            .and_then(|id| self.overseas_quote_snapshot(id));
+        overseas::us_session_at(snapshot, chrono::Utc::now()).unwrap_or(Session::All)
+    }
+
+    pub fn overseas_chart_session(&self, period: crate::model::Period) -> Session {
+        if self.page() == Page::Us && period == crate::model::Period::Intraday {
+            self.active_us_session()
+        } else {
+            Session::All
+        }
+    }
+
+    pub fn overseas_chart_bars<'a>(
+        &self,
+        snapshot: &'a overseas::Snapshot,
+    ) -> Vec<&'a overseas::Bar> {
+        let session = self.overseas_chart_session(snapshot.period);
+        let mut bars = snapshot.bars(session);
+        if self.page() == Page::Us && !self.demo && session != Session::All {
+            let now = chrono::Utc::now();
+            let date = now
+                .with_timezone(&chrono_tz::America::New_York)
+                .date_naive();
+            bars.retain(|bar| {
+                chrono::DateTime::from_timestamp(bar.time, 0).is_some_and(|time| {
+                    time <= now
+                        && time
+                            .with_timezone(&chrono_tz::America::New_York)
+                            .date_naive()
+                            == date
+                })
+            });
+        }
+        bars
+    }
+
     pub fn overseas_label<'a>(&'a self, id: &'a str) -> &'a str {
         if self.user.mode == Mode::Minimal && !self.reveal_names {
             self.user
@@ -150,12 +208,7 @@ impl App {
             }
             KeyCode::Left | KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 if let Some(s) = self.overseas_series() {
-                    let session = if index_page {
-                        Session::All
-                    } else {
-                        self.user.overseas.session
-                    };
-                    let n = s.bars(session).len();
+                    let n = self.overseas_chart_bars(s).len();
                     if n > 0 {
                         let i = self.overseas_cursor.unwrap_or(n - 1).min(n - 1);
                         self.overseas_cursor = Some(if key.code == KeyCode::Left {
@@ -177,10 +230,6 @@ impl App {
                 *p = p.next(key.code == KeyCode::Left);
                 self.overseas_cursor = None;
                 self.request_dirty = true;
-            }
-            KeyCode::Tab if !index_page => {
-                state.session = state.session.next();
-                self.overseas_cursor = None;
             }
             KeyCode::Char('[' | ']') if !index_page => {
                 let ids = std::iter::once(0)

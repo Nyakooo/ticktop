@@ -95,10 +95,12 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
         wait_until(lambda: state().get('overseas', {}).get('aliases', {}).get('MSFT') == 'office', 'US alias missing')
         send('m')
         wait_until(lambda: state().get('mode') == 'minimal', 'minimal mode not saved')
+        prior_session = state()['overseas'].get('session')
         send('\t')
-        wait_until(lambda: state().get('overseas', {}).get('session') == 'pre', 'session switch missing')
+        wait_until(lambda: '自动时段' in visible(), 'automatic session indicator missing')
         send('q')
         wait_until(lambda: proc.poll() is not None, 'exit failed')
+        assert state()['overseas'].get('session') == prior_session, 'Tab changed the automatic session'
         assert proc.returncode == 0
     finally:
         if proc.poll() is None:
@@ -122,4 +124,4 @@ with tempfile.TemporaryDirectory(prefix='ticktop-market-smoke-') as directory:
             proc.terminate()
             proc.wait(timeout=5)
         os.close(master)
-print('PASS: 1-4 navigation, h return, periods, Chinese US subscriptions, aliases, sessions and restart persistence')
+print('PASS: 1-4 navigation, h return, periods, Chinese US subscriptions, aliases, automatic sessions and restart persistence')

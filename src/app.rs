@@ -543,13 +543,43 @@ impl App {
                         missing.join(", ")
                     ))
                 };
+                if snapshots.is_empty() {
+                    self.dirty |= !self.paused;
+                    return;
+                }
                 let mut merged = self.overseas.clone();
+                if self.paused && self.page() == crate::overseas::Page::Us {
+                    merged.extend(
+                        self.pending_overseas
+                            .iter()
+                            .cloned()
+                            .map(|s| ((s.id.clone(), s.period), s)),
+                    );
+                }
                 for mut s in snapshots {
-                    if s.bars.is_empty()
-                        && let Some(old) = merged.get(&(s.id.clone(), s.period))
-                    {
-                        s.bars = old.bars.clone();
-                        s.intervals = old.intervals.clone();
+                    if let Some(old) = merged.get(&(s.id.clone(), s.period)) {
+                        let us_intraday = s.period == crate::model::Period::Intraday
+                            && !crate::instruments::is_index(&s.id);
+                        if s.bars.is_empty() {
+                            s.bars = old.bars.clone();
+                            if !us_intraday || s.intervals.is_empty() {
+                                s.intervals = old.intervals.clone();
+                            }
+                        }
+                        if us_intraday {
+                            use crate::overseas::Session;
+                            if old.regular.session == Session::Regular
+                                && (s.regular.session != Session::Regular
+                                    || old.regular.time > s.regular.time)
+                            {
+                                s.regular = old.regular.clone();
+                            }
+                            for (session, quote) in &old.phases {
+                                if s.phases.get(session).is_none_or(|q| quote.time > q.time) {
+                                    s.phases.insert(*session, quote.clone());
+                                }
+                            }
+                        }
                     }
                     if merged
                         .get(&(s.id.clone(), s.period))

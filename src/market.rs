@@ -552,25 +552,59 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                     {
                         tasks.push((id.clone(), j.period));
                     }
-                    let results = stream::iter(tasks.into_iter().map(|(id, period)| {
+                    if j.us {
+                        tasks.sort_by_key(|(id, _)| j.focus.as_ref() != Some(id));
+                    }
+                    let mut results = stream::iter(tasks.into_iter().map(|(id, period)| {
                         let h = h.clone();
                         let quote_only = !j.us && j.focus.as_ref() != Some(&id);
                         async move {
                             let result = if quote_only {
                                 crate::overseas::fetch_index_quote(&h, &id).await
+                            } else if j.us && period == Period::Intraday {
+                                let (chart, quote) = tokio::join!(
+                                    crate::overseas::fetch_chart(&h, &id, period),
+                                    crate::overseas::fetch_nasdaq_quote(&h, &id)
+                                );
+                                match (chart, quote) {
+                                    (Ok(mut snapshot), Ok(quote)) => {
+                                        crate::overseas::merge_us_quote(&mut snapshot, quote);
+                                        Ok(snapshot)
+                                    }
+                                    (Ok(snapshot), Err(_)) => Ok(snapshot),
+                                    (Err(_), Ok(quote)) => {
+                                        let mut phases = std::collections::BTreeMap::new();
+                                        if quote.session != crate::overseas::Session::Regular {
+                                            phases.insert(quote.session, quote.clone());
+                                        }
+                                        Ok(crate::overseas::Snapshot {
+                                            id: id.clone(),
+                                            period,
+                                            regular: quote,
+                                            phases,
+                                            bars: vec![],
+                                            intervals: vec![],
+                                            received_at: chrono::Utc::now(),
+                                        })
+                                    }
+                                    (Err(error), Err(_)) => Err(error),
+                                }
                             } else {
                                 crate::overseas::fetch_chart(&h, &id, period).await
                             };
                             (id, result)
                         }
                     }))
-                    .buffer_unordered(3)
-                    .collect::<Vec<_>>()
-                    .await;
+                    .buffer_unordered(3);
                     let mut snapshots = vec![];
                     let mut errors = vec![];
-                    for (id, result) in results {
+                    let mut delivered = false;
+                    while let Some((id, result)) = results.next().await {
                         match result {
+                            Ok(s) if j.us => {
+                                tx.send(MarketEvent::Overseas(vec![s], vec![])).await?;
+                                delivered = true;
+                            }
                             Ok(s) => snapshots.push(s),
                             Err(_) => errors.push(id),
                         }
@@ -604,7 +638,7 @@ async fn worker(mut rx: watch::Receiver<Request>, tx: mpsc::Sender<MarketEvent>,
                             Err(_) => errors.extend(domestic),
                         }
                     }
-                    if snapshots.is_empty() {
+                    if snapshots.is_empty() && !delivered {
                         bail!("foreign data unavailable");
                     }
                     MarketEvent::Overseas(snapshots, errors)

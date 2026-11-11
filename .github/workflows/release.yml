@@ -4,101 +4,73 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-15
-            target: aarch64-apple-darwin
-          - os: windows-2022
-            target: x86_64-pc-windows-msvc
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-          target='${{ matrix.target }}'
-          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
-          upper_target="${target^^}"
-          echo "CARGO_TARGET_${upper_target//-/_}_LINKER=musl-gcc" >> "$GITHUB_ENV"
-      - run: cargo test --locked
-      - name: Build release
-        run: |
-          test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
-          if [[ '${{ runner.os }}' == Windows ]]; then
-            export RUSTFLAGS='-C target-feature=+crt-static'
-          fi
-          cargo build --locked --release --target '${{ matrix.target }}'
-      - name: Package Unix
-        if: runner.os != 'Windows'
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          mkdir -p dist
-          cp "target/$TARGET/release/ticktop" dist/ticktop
-          cd dist
-          ./ticktop --version
-          tar -czf "ticktop-$TARGET.tar.gz" ticktop
-          if command -v sha256sum >/dev/null; then
-            sha256sum "ticktop-$TARGET.tar.gz" > "ticktop-$TARGET.tar.gz.sha256"
-          else
-            shasum -a 256 "ticktop-$TARGET.tar.gz" > "ticktop-$TARGET.tar.gz.sha256"
-          fi
-          rm ticktop
-      - name: Package Windows
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          $target = '${{ matrix.target }}'
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "target/$target/release/ticktop.exe" dist/ticktop.exe
-          & ./dist/ticktop.exe --version
-          if ($LASTEXITCODE -ne 0) { throw 'Binary smoke failed' }
-          $asset = "ticktop-$target.zip"
-          Compress-Archive -LiteralPath dist/ticktop.exe -DestinationPath "dist/$asset"
-          $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
-          [IO.File]::WriteAllText((Join-Path (Resolve-Path dist) "$asset.sha256"), "$hash  $asset`n")
-          Remove-Item dist/ticktop.exe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ticktop-${{ matrix.target }}
-          path: dist/*
   publish:
-    needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Verify tag matches package version
+        run: |
+          version="$(sed -n 's/^version = "\\([^"]*\\)"/\\1/p' Cargo.toml | head -1)"
+          test "${GITHUB_REF_NAME#v}" = "$version"
+      - name: Wait for successful CI build of this commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          for attempt in $(seq 1 90); do
+            runs="$(gh run list --repo "$GH_REPO" --workflow ci.yml --commit "$COMMIT_SHA" --branch master --event push --json databaseId,status,conclusion --limit 10)"
+            latest="$(jq -c '.[0] // empty' <<< "$runs")"
+            if [[ -n "$latest" ]]; then
+              status="$(jq -r '.status' <<< "$latest")"
+              conclusion="$(jq -r '.conclusion // empty' <<< "$latest")"
+              candidate="$(jq -r '.databaseId' <<< "$latest")"
+              if [[ "$status" == "completed" ]]; then
+                if [[ "$conclusion" == "success" ]]; then
+                  run_id="$candidate"
+                  break
+                fi
+                echo "CI run $candidate completed with conclusion: $conclusion" >&2
+                exit 1
+              fi
+            fi
+            echo "Waiting for CI build ($attempt/90)..."
+            sleep 20
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "No successful master CI build found for $COMMIT_SHA within 30 minutes." >&2
+            exit 1
+          fi
+          echo "Using CI run $run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - name: Download prebuilt platform artifacts
+        uses: actions/download-artifact@v4
         with:
-          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.ci.outputs.run_id }}
           path: dist
+          merge-multiple: true
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" dist/* --verify-tag --title "Ticktop $TAG" --notes-file docs/RELEASE_NOTES.md
+
   verify-windows:
     needs: publish
     runs-on: windows-2022
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Verify public Windows installation and self-update
@@ -122,4 +94,4 @@ jobs:
       - run: python -m pip install pywinpty==3.0.2
       - name: Verify downloaded binary in Windows ConPTY
         shell: powershell
-        run: python scripts/windows_smoke.py (Join-Path $env:RUNNER_TEMP 'Ticktop installed test\ticktop.exe')
+        run: python scripts/windows_smoke.py (Join-Path $env:RUNNER_TEMP 'Ticktop installed test\\ticktop.exe')

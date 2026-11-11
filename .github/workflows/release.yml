@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify tag matches package version
         run: |
-          version="$(sed -n 's/^version = "\\([^"]*\\)"/\\1/p' Cargo.toml | head -1)"
+          version="$(awk -F'"' '/^version = / { print $2; exit }' Cargo.toml)"
           test "${GITHUB_REF_NAME#v}" = "$version"
       - name: Wait for successful CI build of this commit
         id: ci
